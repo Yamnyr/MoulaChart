@@ -1,0 +1,16 @@
+[theme]
+# --- Palette principale ---
+primaryColor = "#3CB371"          # Vert billet (MediumSeaGreen)
+backgroundColor = "#0E1117"       # Noir/gris profond (fond principal)
+secondaryBackgroundColor = "#1A1D23"  # Gris anthracite doux pour les cartes
+textColor = "#E5E5E5"             # Blanc gris clair pour un bon contraste
+font = "sans serif"               # Police sobre et moderne
+
+# --- Personnalisation Streamlit ---
+[server]
+headless = true
+enableCORS = false
+enableXsrfProtection = true
+
+[browser]
+gatherUsageStats = false
