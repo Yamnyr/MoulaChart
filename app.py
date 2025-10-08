@@ -60,11 +60,9 @@ INTERVALS = {
     "1 mois": "1mo",
 }
 
-# --- Layout ---
-col_form, col_chart = st.columns([1, 3], gap="large")
-
-with col_form:
-    st.markdown("## Paramètres d'analyse")
+# --- Sidebar (anciennement colonne de gauche) ---
+with st.sidebar:
+    st.markdown("## ⚙️ Paramètres d'analyse")
     st.write("Choisis les actifs, la période et les options d'affichage.")
 
     # Sélecteur de source
@@ -112,118 +110,106 @@ with col_form:
         elif source == "CAC 40":
             index_ticker = "^FCHI"
             index_name = "CAC 40 (^FCHI)"
+    else:
+        index_ticker = None
+        index_name = None
 
-with col_chart:
-    if tickers:
-        # Ajouter l'indice de référence si demandé
-        tickers_to_download = tickers.copy()
-        if compare_index:
-            tickers_to_download.append(index_ticker)
 
-        with st.spinner("📡 Chargement des données depuis Yahoo Finance..."):
-            raw_data = yf.download(
-                tickers_to_download,
-                period=period,
-                interval=interval,
-                auto_adjust=True,
-                progress=False
-            )
+# --- Contenu principal (graphiques + stats) ---
+if tickers:
 
-            if isinstance(raw_data.columns, pd.MultiIndex):
-                data = raw_data["Close"]
-            else:
-                data = raw_data[["Close"]].rename(columns={"Close": tickers_to_download[0]})
+    tickers_to_download = tickers.copy()
+    if compare_index and index_ticker:
+        tickers_to_download.append(index_ticker)
 
-        # --- Normalisation optionnelle ---
-        if normalize:
-            data_plot = data / data.iloc[0] * 100
-            ylabel = "Performance (base 100)"
-        else:
-            data_plot = data
-            ylabel = "Prix ($)"
-
-        # --- Graphique principal ---
-        st.markdown("## 📈 Évolution des tickers sélectionnés")
-
-        # Renommer l'indice pour l'affichage
-        data_plot_display = data_plot.copy()
-        if compare_index and index_ticker in data_plot_display.columns:
-            data_plot_display = data_plot_display.rename(columns={index_ticker: index_name})
-
-        fig = px.line(
-            data_plot_display,
-            title="Performance historique des actifs sélectionnés",
-            labels={"value": ylabel, "Date": "Date"}
+    with st.spinner("📡 Chargement des données depuis Yahoo Finance..."):
+        raw_data = yf.download(
+            tickers_to_download,
+            period=period,
+            interval=interval,
+            auto_adjust=True,
+            progress=False
         )
 
-        # Mettre l'indice en pointillés si présent
-        if compare_index:
-            for trace in fig.data:
-                if trace.name == index_name:
-                    trace.line.dash = 'dash'
-                    trace.line.width = 3
+        if isinstance(raw_data.columns, pd.MultiIndex):
+            data = raw_data["Close"]
+        else:
+            data = raw_data[["Close"]].rename(columns={"Close": tickers_to_download[0]})
 
-        st.plotly_chart(fig, use_container_width=True)
+    # --- Normalisation optionnelle ---
+    if normalize:
+        data_plot = data / data.iloc[0] * 100
+        ylabel = "Performance (base 100)"
+    else:
+        data_plot = data
+        ylabel = "Prix ($)"
 
-        # --- Graphiques supplémentaires en colonnes ---
+    # --- Graphique principal ---
+    st.markdown("## 📈 Évolution des tickers sélectionnés")
+
+    data_plot_display = data_plot.copy()
+    if compare_index and index_ticker in data_plot_display.columns:
+        data_plot_display = data_plot_display.rename(columns={index_ticker: index_name})
+
+    fig = px.line(
+        data_plot_display,
+        title="Performance historique des actifs sélectionnés",
+        labels={"value": ylabel, "Date": "Date"}
+    )
+
+    if compare_index:
+        for trace in fig.data:
+            if trace.name == index_name:
+                trace.line.dash = 'dash'
+                trace.line.width = 3
+
+    st.plotly_chart(fig, use_container_width=True)
+
+    # --- Graphiques secondaires ---
+    st.markdown("---")
+    col_left, col_right = st.columns(2)
+
+    with col_left:
+        st.markdown("### 📊 Rendements quotidiens")
+        returns_data = data.pct_change().dropna() * 100
+        if compare_index and index_ticker in returns_data.columns:
+            returns_data = returns_data.rename(columns={index_ticker: index_name})
+        fig_returns = px.line(
+            returns_data,
+            title="Rendements quotidiens (%)",
+            labels={"value": "Rendement (%)", "Date": "Date"}
+        )
+        st.plotly_chart(fig_returns, use_container_width=True)
+
+    with col_right:
+        st.markdown("### 📉 Volatilité glissante (30 jours)")
+        rolling_vol = data.pct_change().rolling(window=30).std() * 100
+        if compare_index and index_ticker in rolling_vol.columns:
+            rolling_vol = rolling_vol.rename(columns={index_ticker: index_name})
+        fig_vol = px.line(
+            rolling_vol,
+            title="Volatilité sur 30 jours (%)",
+            labels={"value": "Volatilité (%)", "Date": "Date"}
+        )
+        st.plotly_chart(fig_vol, use_container_width=True)
+
+    # --- Graphique de corrélation ---
+    if len(tickers) > 1:
         st.markdown("---")
-        col_left, col_right = st.columns(2)
+        st.markdown("### 🔗 Matrice de corrélation")
+        correlation = data.pct_change().corr()
+        if compare_index and index_ticker in correlation.columns:
+            correlation = correlation.rename(columns={index_ticker: index_name}, index={index_ticker: index_name})
+        fig_corr = px.imshow(
+            correlation,
+            text_auto=".2f",
+            title="Corrélation entre les rendements",
+            color_continuous_scale="RdBu_r",
+            aspect="auto"
+        )
+        st.plotly_chart(fig_corr, use_container_width=True)
 
-        with col_left:
-            st.markdown("### 📊 Rendements quotidiens")
-            returns_data = data.pct_change().dropna() * 100
-            if compare_index and index_ticker in returns_data.columns:
-                returns_data = returns_data.rename(columns={index_ticker: index_name})
-            fig_returns = px.line(
-                returns_data,
-                title="Rendements quotidiens (%)",
-                labels={"value": "Rendement (%)", "Date": "Date"}
-            )
-            st.plotly_chart(fig_returns, use_container_width=True)
-
-        with col_right:
-            st.markdown("### 📉 Volatilité glissante (30 jours)")
-            rolling_vol = data.pct_change().rolling(window=30).std() * 100
-            if compare_index and index_ticker in rolling_vol.columns:
-                rolling_vol = rolling_vol.rename(columns={index_ticker: index_name})
-            fig_vol = px.line(
-                rolling_vol,
-                title="Volatilité sur 30 jours (%)",
-                labels={"value": "Volatilité (%)", "Date": "Date"}
-            )
-            st.plotly_chart(fig_vol, use_container_width=True)
-
-        # --- Graphique des volumes (si disponibles) ---
-        if "Volume" in raw_data.columns.get_level_values(0):
-            st.markdown("---")
-            st.markdown("### 📦 Volume de transactions")
-            if isinstance(raw_data.columns, pd.MultiIndex):
-                volume_data = raw_data["Volume"]
-                if compare_index and index_ticker in volume_data.columns:
-                    volume_data = volume_data.rename(columns={index_ticker: index_name})
-                fig_volume = px.bar(
-                    volume_data,
-                    title="Volume de transactions",
-                    labels={"value": "Volume", "Date": "Date"}
-                )
-                st.plotly_chart(fig_volume, use_container_width=True)
-
-        # --- Graphique de corrélation ---
-        if len(tickers) > 1:
-            st.markdown("---")
-            st.markdown("### 🔗 Matrice de corrélation")
-            correlation = data.pct_change().corr()
-            if compare_index and index_ticker in correlation.columns:
-                correlation = correlation.rename(columns={index_ticker: index_name}, index={index_ticker: index_name})
-            fig_corr = px.imshow(
-                correlation,
-                text_auto=".2f",
-                title="Corrélation entre les rendements",
-                color_continuous_scale="RdBu_r",
-                aspect="auto"
-            )
-            st.plotly_chart(fig_corr, use_container_width=True)
-
+    # --- Stats détaillées ---
         if show_stats:
             st.markdown("---")
             st.markdown("## 📊 Statistiques de performance détaillées")
