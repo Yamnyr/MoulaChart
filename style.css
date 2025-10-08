@@ -1,0 +1,52 @@
+/* style.css */
+
+/* Palette moderne */
+:root {
+    --primary: #6366f1;
+    --secondary: #8b5cf6;
+    --success: #10b981;
+    --warning: #f59e0b;
+    --danger: #ef4444;
+    --background: #0f172a;
+    --surface: #1e293b;
+}
+
+/* En-tête moderne */
+/*.main-header {*/
+/*    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);*/
+/*    padding: 1rem;*/
+/*    border-radius: 16px;*/
+/*    margin-bottom: 1rem;*/
+/*    box-shadow: 0 10px 40px rgba(102, 126, 234, 0.3);*/
+/*}*/
+/*.main-header h1 {*/
+/*    color: white;*/
+/*    font-size: 3rem;*/
+/*    font-weight: 800;*/
+/*    margin: 0;*/
+/*    text-shadow: 2px 2px 4px rgba(0,0,0,0.2);*/
+/*}*/
+/*.main-header p {*/
+/*    color: rgba(255,255,255,0.9);*/
+/*    font-size: 1.2rem;*/
+/*    margin-top: 0.5rem;*/
+/*}*/
+
+/* Cartes statistiques */
+.stat-card {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    padding: 1.5rem;
+    border-radius: 12px;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.1);
+    margin-bottom: 1rem;
+    transition: transform 0.3s ease;
+}
+.stat-card:hover {
+    transform: translateY(-5px);
+    box-shadow: 0 8px 30px rgba(102, 126, 234, 0.4);
+}
+hr{
+    margin:1.5rem!important;
+}
+
+/* ... etc. (copie le reste du CSS ici) */
