@@ -1,19 +1,21 @@
 [theme]
-# Thème moderne violet/bleu pour MoulaChart
-primaryColor = "#667eea"
-backgroundColor = "#0f172a"
-secondaryBackgroundColor = "#1e293b"
-textColor = "#e2e8f0"
+# Thème moderne minimaliste avec accent vert
+primaryColor = "#10b981"           # Vert émeraude
+backgroundColor = "#0f172a"        # Bleu très foncé
+secondaryBackgroundColor = "#1e293b"  # Bleu foncé
+textColor = "#f1f5f9"              # Blanc cassé
 font = "sans serif"
-
 
 [runner]
 # Optimisations de performance
 magicEnabled = true
 fastReruns = true
 
-
 [ui]
 # Configuration de l'interface
 hideTopBar = false
-hideSidebarNav = false
+
+[client]
+# Configuration client
+showErrorDetails = false
+toolbarMode = "minimal"

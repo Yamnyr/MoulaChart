@@ -5,3 +5,4 @@ plotly
 requests
 lxml
 matplotlib
+yahooquery
