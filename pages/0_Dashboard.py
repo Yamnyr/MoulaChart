@@ -195,8 +195,16 @@ if tickers:
         data_plot_display = data_plot_display.rename(columns={index_ticker: index_name})
 
     fig = go.Figure()
-
-    colors = ['#667eea', '#764ba2', '#f093fb', '#4facfe', '#43e97b', '#fa709a']
+    colors = [
+        "#10b981",  # Vert émeraude
+        "#3b82f6",  # Bleu accent
+        "#a855f7",  # Violet
+        "#f97316",  # Orange
+        "#e11d48",  # Rose / Rouge
+        "#14b8a6",  # Turquoise
+        "#facc15",  # Jaune doré
+        "#6366f1",  # Indigo clair
+    ]
 
     for idx, col in enumerate(data_plot_display.columns):
         is_index = (compare_index and col == index_name)
@@ -335,55 +343,95 @@ if tickers:
             perf = perf.rename(index={index_ticker: index_name})
 
         # Onglets avec dégradés de couleurs harmonieux
-        tab1, tab2, tab3, tab4 = st.tabs(["Vue d'ensemble", "Prix & Performance", "Risque", "Distribution"])
+        # tab1, tab2, tab3, tab4 = st.tabs(["Vue d'ensemble", "Prix & Performance", "Risque", "Distribution"])
+        #
+        # with tab1:
+        #     overview_cols = ["Performance totale (%)", "Performance annualisée (%)", "Volatilité annualisée (%)",
+        #                      "Ratio Sharpe", "Drawdown max (%)", "Jours positifs (%)"]
+        #     st.dataframe(
+        #         perf[overview_cols].style.format("{:.2f}")
+        #         .background_gradient(cmap="RdYlGn", subset=["Performance totale (%)", "Performance annualisée (%)"], axis=0)
+        #         .background_gradient(cmap="YlOrRd", subset=["Volatilité annualisée (%)"], axis=0)
+        #         .background_gradient(cmap="RdYlGn", subset=["Ratio Sharpe", "Jours positifs (%)"], axis=0)
+        #         .background_gradient(cmap="RdYlGn_r", subset=["Drawdown max (%)"], axis=0),
+        #         width='stretch'
+        #     )
+        #
+        # with tab2:
+        #     price_cols = ["Prix initial ($)", "Prix final ($)", "Plus haut ($)", "Plus bas ($)",
+        #                   "Performance totale (%)", "Performance annualisée (%)", "Rendement moyen (%)",
+        #                   "Rendement médian (%)"]
+        #     st.dataframe(
+        #         perf[price_cols].style.format("{:.2f}")
+        #         .background_gradient(cmap="Blues", subset=["Prix initial ($)", "Prix final ($)", "Plus haut ($)", "Plus bas ($)"], axis=0)
+        #         .background_gradient(cmap="RdYlGn", subset=["Performance totale (%)", "Performance annualisée (%)", "Rendement moyen (%)", "Rendement médian (%)"], axis=0),
+        #         width='stretch'
+        #     )
+        #
+        # with tab3:
+        #     risk_cols = ["Volatilité quotidienne (%)", "Volatilité annualisée (%)", "Ratio Sharpe", "Ratio Sortino",
+        #                  "Drawdown max (%)", "Drawdown actuel (%)", "Meilleur jour (%)", "Pire jour (%)"]
+        #     st.dataframe(
+        #         perf[risk_cols].style.format("{:.2f}")
+        #         .background_gradient(cmap="YlOrRd", subset=["Volatilité quotidienne (%)", "Volatilité annualisée (%)"], axis=0)
+        #         .background_gradient(cmap="RdYlGn", subset=["Ratio Sharpe", "Ratio Sortino"], axis=0)
+        #         .background_gradient(cmap="RdYlGn_r", subset=["Drawdown max (%)", "Drawdown actuel (%)"], axis=0)
+        #         .background_gradient(cmap="RdYlGn", subset=["Meilleur jour (%)"], axis=0)
+        #         .background_gradient(cmap="RdYlGn_r", subset=["Pire jour (%)"], axis=0),
+        #         width='stretch'
+        #     )
+        #
+        # with tab4:
+        #     dist_cols = ["Jours positifs (%)", "Gain moyen (%)", "Perte moyenne (%)",
+        #                  "Ratio Gain/Perte", "Skewness", "Kurtosis"]
+        #     st.dataframe(
+        #         perf[dist_cols].style.format("{:.2f}")
+        #         .background_gradient(cmap="RdYlGn", subset=["Jours positifs (%)", "Gain moyen (%)", "Ratio Gain/Perte"], axis=0)
+        #         .background_gradient(cmap="RdYlGn_r", subset=["Perte moyenne (%)"], axis=0)
+        #         .background_gradient(cmap="RdBu_r", subset=["Skewness"], axis=0)
+        #         .background_gradient(cmap="PuOr", subset=["Kurtosis"], axis=0),
+        #         width='stretch'
+        #     )
+
+        tab1, tab2, tab3 = st.tabs(["Performance", "Risque & Ratios", "Détails"])
 
         with tab1:
-            overview_cols = ["Performance totale (%)", "Performance annualisée (%)", "Volatilité annualisée (%)",
-                             "Ratio Sharpe", "Drawdown max (%)", "Jours positifs (%)"]
+            perf_cols = ["Prix initial ($)", "Prix final ($)", "Plus haut ($)", "Plus bas ($)",
+                         "Performance totale (%)", "Performance annualisée (%)", "Jours positifs (%)"]
             st.dataframe(
-                perf[overview_cols].style.format("{:.2f}")
-                .background_gradient(cmap="RdYlGn", subset=["Performance totale (%)", "Performance annualisée (%)"], axis=0)
-                .background_gradient(cmap="YlOrRd", subset=["Volatilité annualisée (%)"], axis=0)
-                .background_gradient(cmap="RdYlGn", subset=["Ratio Sharpe", "Jours positifs (%)"], axis=0)
-                .background_gradient(cmap="RdYlGn_r", subset=["Drawdown max (%)"], axis=0),
+                perf[perf_cols].style.format("{:.2f}")
+                .background_gradient(cmap="Blues",
+                                     subset=["Prix initial ($)", "Prix final ($)", "Plus haut ($)", "Plus bas ($)"],
+                                     axis=0)
+                .background_gradient(cmap="RdYlGn", subset=["Performance totale (%)", "Performance annualisée (%)",
+                                                            "Jours positifs (%)"], axis=0),
                 width='stretch'
             )
 
         with tab2:
-            price_cols = ["Prix initial ($)", "Prix final ($)", "Plus haut ($)", "Plus bas ($)",
-                          "Performance totale (%)", "Performance annualisée (%)", "Rendement moyen (%)",
-                          "Rendement médian (%)"]
+            risk_cols = ["Volatilité annualisée (%)", "Ratio Sharpe", "Ratio Sortino",
+                         "Drawdown max (%)", "Meilleur jour (%)", "Pire jour (%)"]
             st.dataframe(
-                perf[price_cols].style.format("{:.2f}")
-                .background_gradient(cmap="Blues", subset=["Prix initial ($)", "Prix final ($)", "Plus haut ($)", "Plus bas ($)"], axis=0)
-                .background_gradient(cmap="RdYlGn", subset=["Performance totale (%)", "Performance annualisée (%)", "Rendement moyen (%)", "Rendement médian (%)"], axis=0),
+                perf[risk_cols].style.format("{:.2f}")
+                .background_gradient(cmap="YlOrRd", subset=["Volatilité annualisée (%)"], axis=0)
+                .background_gradient(cmap="RdYlGn", subset=["Ratio Sharpe", "Ratio Sortino", "Meilleur jour (%)"],
+                                     axis=0)
+                .background_gradient(cmap="RdYlGn_r", subset=["Drawdown max (%)", "Pire jour (%)"], axis=0),
                 width='stretch'
             )
 
         with tab3:
-            risk_cols = ["Volatilité quotidienne (%)", "Volatilité annualisée (%)", "Ratio Sharpe", "Ratio Sortino",
-                         "Drawdown max (%)", "Drawdown actuel (%)", "Meilleur jour (%)", "Pire jour (%)"]
+            detail_cols = ["Rendement moyen (%)", "Rendement médian (%)", "Gain moyen (%)",
+                           "Perte moyenne (%)", "Ratio Gain/Perte"]
             st.dataframe(
-                perf[risk_cols].style.format("{:.2f}")
-                .background_gradient(cmap="YlOrRd", subset=["Volatilité quotidienne (%)", "Volatilité annualisée (%)"], axis=0)
-                .background_gradient(cmap="RdYlGn", subset=["Ratio Sharpe", "Ratio Sortino"], axis=0)
-                .background_gradient(cmap="RdYlGn_r", subset=["Drawdown max (%)", "Drawdown actuel (%)"], axis=0)
-                .background_gradient(cmap="RdYlGn", subset=["Meilleur jour (%)"], axis=0)
-                .background_gradient(cmap="RdYlGn_r", subset=["Pire jour (%)"], axis=0),
+                perf[detail_cols].style.format("{:.2f}")
+                .background_gradient(cmap="RdYlGn",
+                                     subset=["Rendement moyen (%)", "Rendement médian (%)", "Gain moyen (%)",
+                                             "Ratio Gain/Perte"], axis=0)
+                .background_gradient(cmap="RdYlGn_r", subset=["Perte moyenne (%)"], axis=0),
                 width='stretch'
             )
 
-        with tab4:
-            dist_cols = ["Jours positifs (%)", "Gain moyen (%)", "Perte moyenne (%)",
-                         "Ratio Gain/Perte", "Skewness", "Kurtosis"]
-            st.dataframe(
-                perf[dist_cols].style.format("{:.2f}")
-                .background_gradient(cmap="RdYlGn", subset=["Jours positifs (%)", "Gain moyen (%)", "Ratio Gain/Perte"], axis=0)
-                .background_gradient(cmap="RdYlGn_r", subset=["Perte moyenne (%)"], axis=0)
-                .background_gradient(cmap="RdBu_r", subset=["Skewness"], axis=0)
-                .background_gradient(cmap="PuOr", subset=["Kurtosis"], axis=0),
-                width='stretch'
-            )
 
         # --- Visualisations supplémentaires ---
         st.markdown("---")

@@ -77,7 +77,7 @@ with st.form("calcul_interets"):
         with col4:
             taux_pessimiste = st.number_input("Taux pessimiste (%)", 0.0, 20.0, max(0.0, taux_interet - 2.0), 0.1)
 
-    submitted = st.form_submit_button("Calculer", width='stretch')
+    submitted = st.form_submit_button("Calculer",type="primary", width='stretch')
 
 
 def calculer_evolution(capital_init, epargne_mens, taux_annuel, horizon_ans, taux_prog=0, taux_infl=0, taux_impot=0):
@@ -360,15 +360,15 @@ if submitted:
                 objectif_atteint = obj
 
         if objectif_atteint:
-            st.success(f"✅ Objectif de {objectif_atteint:,} € atteint!")
+            st.success(f"Objectif de {objectif_atteint:,} € atteint!")
             prochain_objectif = next((o for o in objectifs if o > capital_final), None)
             if prochain_objectif:
                 manque = prochain_objectif - capital_final
-                st.info(f"🎯 Prochain objectif: {prochain_objectif:,} € (encore {manque:,.0f} €)")
+                st.info(f"Prochain objectif: {prochain_objectif:,} € (encore {manque:,.0f} €)")
         else:
             premier_objectif = objectifs[0]
             manque = premier_objectif - capital_final
-            st.info(f"🎯 Premier objectif: {premier_objectif:,} € (encore {manque:,.0f} €)")
+            st.info(f"Premier objectif: {premier_objectif:,} € (encore {manque:,.0f} €)")
 
         # Calcul du temps pour doubler le capital
         if taux_interet > 0:
@@ -400,5 +400,3 @@ if submitted:
     df_annees = pd.DataFrame(annees_data)
     st.dataframe(df_annees, width='stretch', hide_index=True)
 
-else:
-    st.info("Remplissez le formulaire ci-dessus et cliquez sur 'Calculer' pour voir vos résultats.")

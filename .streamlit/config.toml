@@ -1,10 +1,12 @@
 [theme]
-# Thème moderne minimaliste avec accent vert
-primaryColor = "#10b981"           # Vert émeraude
-backgroundColor = "#0f172a"        # Bleu très foncé
-secondaryBackgroundColor = "#1e293b"  # Bleu foncé
-textColor = "#f1f5f9"              # Blanc cassé
-font = "sans serif"
+# --- Couleurs principales ---
+primaryColor = "#10b981"           # Vert émeraude (CTA, boutons)
+backgroundColor = "#0c0c0d"        # Noir profond
+secondaryBackgroundColor = "#1a1b1e"  # Gris anthracite
+textColor = "#f1f5f9"              # Blanc cassé pour lisibilité
+
+# --- Couleurs supplémentaires ---
+borderColor = "#2d2d30"
 
 [runner]
 # Optimisations de performance
