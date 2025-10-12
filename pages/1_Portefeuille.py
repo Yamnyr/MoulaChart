@@ -15,10 +15,6 @@ if not st.user.is_logged_in:
     st.button("Se connecter avec Google", on_click=st.login)
     st.stop()
 
-# --- Barre latérale ---
-# st.sidebar.success(f"Connecté en tant que {st.user.name or st.user.email}")
-# st.sidebar.button("🚪 Se déconnecter", on_click=st.logout)
-
 
 # --- Connexion à la base Supabase ---
 @st.cache_resource
@@ -47,7 +43,6 @@ def search_assets_dynamic(search_term: str, **kwargs):
         if not results or 'quotes' not in results:
             return []
 
-        # Retourner une liste de strings
         options = []
         for quote in results['quotes'][:10]:
             if quote.get('isYahooFinance', False):
@@ -76,7 +71,43 @@ def validate_ticker(ticker):
         return False, None
 
 
-# --- Téléchargement des données avec cache ---# --- Téléchargement des données avec cache ---
+# --- Récupération des infos détaillées (frais, dividendes) ---
+@st.cache_data(ttl=3600)
+def get_asset_details(ticker):
+    """Récupère les informations détaillées d'un actif"""
+    try:
+        stock = yf.Ticker(ticker)
+        info = stock.info
+
+        # Récupérer l'expense ratio - essayer plusieurs champs
+        # Yahoo Finance utilise des noms différents selon les marchés
+        expense_ratio = None
+        if info.get('netExpenseRatio'):  # ETF européens (déjà en %)
+            expense_ratio = info.get('netExpenseRatio') / 100  # Convertir en décimal
+        elif info.get('expenseRatio'):  # ETF US (déjà en décimal)
+            expense_ratio = info.get('expenseRatio')
+        elif info.get('annualReportExpenseRatio'):
+            expense_ratio = info.get('annualReportExpenseRatio') / 100
+
+        details = {
+            'expense_ratio': expense_ratio,  # Frais de gestion (ETF/Fonds)
+            'dividend_yield': info.get('dividendYield', None),  # Rendement dividende
+            'dividend_rate': info.get('dividendRate', None),  # Dividende annuel
+            'payout_ratio': info.get('payoutRatio', None),  # Taux de distribution
+            'ex_dividend_date': info.get('exDividendDate', None),  # Date ex-dividende
+            'five_year_avg_dividend_yield': info.get('fiveYearAvgDividendYield', None),
+            'trailing_annual_dividend_rate': info.get('trailingAnnualDividendRate', None),
+            'trailing_annual_dividend_yield': info.get('trailingAnnualDividendYield', None),
+            'category': info.get('category', None),
+            'fund_family': info.get('fundFamily', None),
+        }
+
+        return details
+    except Exception as e:
+        return {}
+
+
+# --- Téléchargement des données avec cache ---
 @st.cache_data(ttl=1800)
 def download_portfolio_data(tickers_list):
     """Télécharge les données pour le portefeuille"""
@@ -84,32 +115,25 @@ def download_portfolio_data(tickers_list):
         if not tickers_list:
             return None
 
-        # Dictionnaire pour stocker le dernier prix de chaque ticker
         latest_prices = {}
 
         for ticker in tickers_list:
             try:
-                # Télécharger les données
                 ticker_data = yf.download(ticker, period="5d", interval="1d", auto_adjust=True, progress=False)
 
                 if ticker_data.empty:
                     continue
 
-                # Gérer le cas MultiIndex (quand yfinance retourne plusieurs niveaux de colonnes)
                 if isinstance(ticker_data.columns, pd.MultiIndex):
-                    # Aplatir les colonnes MultiIndex
                     ticker_data.columns = ticker_data.columns.get_level_values(0)
 
-                # Extraire la colonne Close
                 if "Close" in ticker_data.columns:
                     close_series = ticker_data["Close"]
                 elif len(ticker_data.columns) > 0:
-                    # Prendre la première colonne disponible
                     close_series = ticker_data.iloc[:, 0]
                 else:
                     continue
 
-                # Récupérer le dernier prix valide (non-NaN)
                 clean_series = close_series.dropna()
                 if len(clean_series) > 0:
                     last_price = float(clean_series.iloc[-1])
@@ -122,7 +146,6 @@ def download_portfolio_data(tickers_list):
         if not latest_prices:
             return None
 
-        # Créer un DataFrame simple avec une seule ligne contenant les derniers prix
         data = pd.DataFrame([latest_prices], index=[pd.Timestamp.now()])
         return data
 
@@ -131,18 +154,11 @@ def download_portfolio_data(tickers_list):
         return None
 
 
-# st.title("💼 Mon Portefeuille")
-# st.caption("Gérez vos actifs et suivez leurs performances.")
-
 # --- Formulaire d'ajout dans la barre latérale ---
 with st.sidebar:
     st.title("💼 Mon Portefeuille")
-    # st.subheader("Ajouter un actif")
     st.markdown("---")
 
-    # st.subheader("Ajouter un actif")
-
-    # Champ de recherche
     selected = st_searchbox(
         search_assets_dynamic,
         key="asset_searchbox",
@@ -162,13 +178,11 @@ with st.sidebar:
     quantity = st.number_input("Quantité", min_value=0.0, step=1.0, format="%.4f", key="sidebar_qty")
     pru = st.number_input("PRU ($)", min_value=0.0, step=0.01, format="%.2f", key="sidebar_pru")
 
-    if st.button("Ajouter au portefeuille", type="primary", use_container_width=True):
+    if st.button("Ajouter au portefeuille", type="primary", width='stretch'):
         if not ticker:
             st.error("❌ Veuillez sélectionner un actif à partir du champ de recherche")
         elif quantity <= 0:
             st.error("❌ La quantité doit être supérieure à 0")
-        # elif pru <= 0:
-        #     st.error("❌ Le PRU doit être supérieur à 0")
         else:
             with st.spinner(f"🔍 Vérification de {ticker}..."):
                 is_valid, name = validate_ticker(ticker)
@@ -198,8 +212,7 @@ with st.sidebar:
 
     st.markdown("---")
     st.sidebar.success(f"Connecté en tant que {st.user.name or st.user.email}")
-    st.sidebar.button("Se déconnecter", on_click=st.logout,  width='stretch')
-
+    st.sidebar.button("Se déconnecter", on_click=st.logout, width='stretch')
 
 # --- Lecture du portefeuille utilisateur ---
 try:
@@ -289,7 +302,7 @@ st.dataframe(
     })
     .background_gradient(cmap="RdYlGn", subset=["Gain/Perte (%)"], axis=0)
     .background_gradient(cmap="Blues", subset=["Poids (%)"], axis=0),
-     width='stretch',
+    width='stretch',
     hide_index=True
 )
 
@@ -334,11 +347,115 @@ with col_chart2:
     )
     st.plotly_chart(fig_bar, config={'responsive': True})
 
-# --- Modification et suppression ---
+# --- Scanner de Frais et Dividendes ---
 st.markdown("---")
-# col_edit, col_delete = st.columns(2)
+st.subheader("Scanner de Frais & Dividendes")
+
+with st.spinner("Analyse des frais et dividendes..."):
+    fees_data = []
+
+    for ticker in df_valid["ticker"].unique():
+        details = get_asset_details(ticker)
+        position = df_valid[df_valid["ticker"] == ticker].iloc[0]
+
+        # Calcul des dividendes annuels estimés
+        dividend_annual = None
+        dividend_total = None
+        if details.get('dividend_rate') and details['dividend_rate'] > 0:
+            dividend_annual = details['dividend_rate']
+            dividend_total = dividend_annual * position['quantity']
+        elif details.get('trailing_annual_dividend_rate') and details['trailing_annual_dividend_rate'] > 0:
+            dividend_annual = details['trailing_annual_dividend_rate']
+            dividend_total = dividend_annual * position['quantity']
+
+        # Calcul des frais annuels (pour ETF/Fonds)
+        fees_annual = None
+        if details.get('expense_ratio') and details['expense_ratio'] > 0:
+            fees_annual = position['Valeur actuelle'] * details['expense_ratio']
+
+        fees_data.append({
+            'Ticker': ticker,
+            'Valeur': position['Valeur actuelle'],
+            'Frais de gestion (%)': details.get('expense_ratio'),
+            'Frais annuels ($)': fees_annual,
+            'Rendement dividende (%)': details.get('dividend_yield') or details.get('trailing_annual_dividend_yield'),
+            'Dividende annuel/action ($)': dividend_annual,
+            'Dividendes annuels totaux ($)': dividend_total,
+            'Taux de distribution (%)': details.get('payout_ratio'),
+        })
+
+df_fees = pd.DataFrame(fees_data)
+
+# Onglets pour Frais et Dividendes
+tab_fees, tab_div = st.tabs(["Frais de Gestion", "Dividendes"])
+
+with tab_fees:
+    df_with_fees = df_fees[df_fees['Frais de gestion (%)'].notna()].copy()
+
+    if df_with_fees.empty:
+        st.info("ℹ️ Aucun frais de gestion détecté (normal pour les actions individuelles)")
+    else:
+        col_f1, col_f2, col_f3 = st.columns(3)
+
+        total_fees = df_with_fees['Frais annuels ($)'].sum()
+        avg_expense_ratio = (df_with_fees['Frais de gestion (%)'] * 100).mean()
+
+        with col_f1:
+            st.metric("Frais annuels totaux", f"${total_fees:,.2f}")
+        with col_f2:
+            st.metric("Ratio moyen", f"{avg_expense_ratio:.3f}%")
+        with col_f3:
+            highest_fee = df_with_fees.loc[df_with_fees['Frais annuels ($)'].idxmax()]
+            st.metric("Plus élevé", highest_fee['Ticker'], f"${highest_fee['Frais annuels ($)']:,.2f}")
+
+        st.dataframe(
+            df_with_fees[['Ticker', 'Valeur', 'Frais de gestion (%)', 'Frais annuels ($)']]
+            .style.format({
+                'Valeur': '${:,.2f}',
+                'Frais de gestion (%)': '{:.3%}',
+                'Frais annuels ($)': '${:,.2f}'
+            })
+            .background_gradient(cmap="Reds", subset=['Frais annuels ($)'], axis=0),
+            width='stretch',
+            hide_index=True
+        )
+
+with tab_div:
+    df_with_div = df_fees[df_fees['Dividendes annuels totaux ($)'].notna()].copy()
+
+    if df_with_div.empty:
+        st.info("ℹ️ Aucun dividende détecté dans votre portefeuille")
+    else:
+        col_d1, col_d2, col_d3 = st.columns(3)
+
+        total_dividends = df_with_div['Dividendes annuels totaux ($)'].sum()
+        avg_yield = (df_with_div['Rendement dividende (%)'] * 100).mean()
+
+        with col_d1:
+            st.metric("Dividendes annuels totaux", f"${total_dividends:,.2f}")
+        with col_d2:
+            st.metric("Rendement moyen", f"{avg_yield:.2f}%")
+        with col_d3:
+            st.metric("Revenus mensuels estimés", f"${total_dividends / 12:,.2f}")
+
+        st.dataframe(
+            df_with_div[['Ticker', 'Valeur', 'Rendement dividende (%)', 'Dividende annuel/action ($)',
+                         'Dividendes annuels totaux ($)', 'Taux de distribution (%)']]
+            .style.format({
+                'Valeur': '${:,.2f}',
+                'Rendement dividende (%)': '{:.2%}',
+                'Dividende annuel/action ($)': '${:.2f}',
+                'Dividendes annuels totaux ($)': '${:,.2f}',
+                'Taux de distribution (%)': '{:.2%}'
+            })
+            .background_gradient(cmap="Greens", subset=['Dividendes annuels totaux ($)'], axis=0),
+            width='stretch',
+            hide_index=True
+        )
+
 
 # --- Actions rapides ---
+st.markdown("---")
 tab1, tab2, tab3 = st.tabs(["Modifier", "Supprimer", "Exporter"])
 
 with tab1:
@@ -370,8 +487,7 @@ with tab2:
     if delete_ticker:
         info = df[df["ticker"] == delete_ticker].iloc[0]
         st.warning(f"⚠️ Supprimer {delete_ticker} ({info['quantity']} unités)")
-        # col_d1, col_d2 = st.columns(2)
-        # with col_d1:
+
         if st.button("Confirmer", type="primary",  width='stretch'):
             try:
                 supabase.table("portfolio").delete().eq("user_email", st.user.email).eq("ticker",
@@ -382,9 +498,6 @@ with tab2:
                 st.error(f"Erreur : {str(e)}")
 
 with tab3:
-    # st.markdown("---")
-    # st.subheader("💾 Exporter les données")
-
     col_export1, col_export2 = st.columns(2)
 
     with col_export1:
@@ -401,21 +514,32 @@ with tab3:
         )
 
     with col_export2:
+        # Calcul des totaux pour le rapport
+        total_fees_report = df_fees[df_fees['Frais annuels ($)'].notna()]['Frais annuels ($)'].sum()
+        total_div_report = df_fees[df_fees['Dividendes annuels totaux ($)'].notna()][
+            'Dividendes annuels totaux ($)'].sum()
+
         rapport = f"""RAPPORT DE PORTEFEUILLE
-    Date: {datetime.now().strftime('%d/%m/%Y %H:%M')}
-    Utilisateur: {st.user.email}
+Date: {datetime.now().strftime('%d/%m/%Y %H:%M')}
+Utilisateur: {st.user.email}
 
-    RÉSUMÉ
-    ------
-    Valeur totale: ${total_valeur:,.2f}
-    Capital investi: ${total_investi:,.2f}
-    Gain/Perte: ${total_gain:+,.2f} ({perf_totale:+.2f}%)
-    Nombre d'actifs: {len(df_valid)}
+RÉSUMÉ
+------
+Valeur totale: ${total_valeur:,.2f}
+Capital investi: ${total_investi:,.2f}
+Gain/Perte: ${total_gain:+,.2f} ({perf_totale:+.2f}%)
+Nombre d'actifs: {len(df_valid)}
 
-    POSITIONS
-    ---------
-    {df_display[['ticker', 'quantity', 'Dernier prix', 'Valeur actuelle', 'Gain/Perte (%)']].to_string()}
-    """
+FRAIS & DIVIDENDES
+------------------
+Frais annuels totaux: ${total_fees_report:,.2f}
+Dividendes annuels totaux: ${total_div_report:,.2f}
+Revenus nets estimés: ${total_div_report - total_fees_report:,.2f}
+
+POSITIONS
+---------
+{df_display[['ticker', 'quantity', 'Dernier prix', 'Valeur actuelle', 'Gain/Perte (%)']].to_string()}
+"""
 
         st.download_button(
             label="Télécharger le rapport (TXT)",
@@ -424,5 +548,3 @@ with tab3:
             mime="text/plain",
              width='stretch'
         )
-
-# --- Export ---
