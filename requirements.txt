@@ -6,3 +6,6 @@ requests
 lxml
 matplotlib
 yahooquery
+supabase
+streamlit-searchbox
+authlib
