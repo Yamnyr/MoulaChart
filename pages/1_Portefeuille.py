@@ -133,6 +133,22 @@ def get_asset_names(tickers_list: list) -> dict:
             names[ticker] = ticker
     return names
 
+
+@st.cache_data(ttl=3600)
+def get_asset_sector_and_country(tickers_list: list) -> dict:
+    """Récupère le secteur et le pays pour chaque ticker."""
+    sectors = {}
+    countries = {}
+    for ticker in tickers_list:
+        try:
+            info = yf.Ticker(ticker).info
+            sectors[ticker] = info.get('sector', 'Inconnu')
+            countries[ticker] = info.get('country', 'Inconnu')
+        except:
+            sectors[ticker] = 'Inconnu'
+            countries[ticker] = 'Inconnu'
+    return {'sectors': sectors, 'countries': countries}
+
 def search_assets_dynamic(search_term: str, **kwargs) -> list:
     """Fonction de recherche pour le composant searchbox."""
     if not search_term or len(search_term) < 2:
@@ -152,6 +168,37 @@ def search_assets_dynamic(search_term: str, **kwargs) -> list:
         return options
     except:
         return []
+
+def calculate_diversification_score(df_valid: pd.DataFrame, sectors: dict, countries: dict) -> tuple:
+    """Calcule les scores de diversification sectorielle et géographique."""
+    # --- Diversification sectorielle ---
+    sector_counts = {}
+    for ticker in df_valid['ticker']:
+        sector = sectors.get(ticker, 'Inconnu')
+        sector_counts[sector] = sector_counts.get(sector, 0) + 1
+
+    # Score sectoriel : 100% si tous les secteurs sont différents, 0% si tous les actifs sont dans le même secteur
+    if len(sector_counts) == 0:
+        sector_score = 0.0
+    else:
+        sector_score = (1 - max(sector_counts.values()) / len(df_valid)) * 100
+
+    # --- Diversification géographique ---
+    country_weights = {}
+    for ticker in df_valid['ticker']:
+        country = countries.get(ticker, 'Inconnu')
+        weight = df_valid[df_valid['ticker'] == ticker]['Poids (%)'].iloc[0]
+        country_weights[country] = country_weights.get(country, 0) + weight
+
+    # Score géographique : 100% si les poids sont uniformément répartis, 0% si tout est concentré dans un seul pays
+    if len(country_weights) == 0:
+        geo_score = 0.0
+    else:
+        max_weight = max(country_weights.values())
+        geo_score = (1 - max_weight / 100) * 100
+
+    return sector_score, geo_score
+
 
 # --- Barre latérale ---
 with st.sidebar:
@@ -255,9 +302,17 @@ vol_dict = calculate_volatility(df_valid["ticker"].tolist())
 df_valid["Volatilité (%)"] = df_valid["ticker"].apply(lambda x: vol_dict.get(x) * 100 if vol_dict.get(x) else None)
 
 # --- Résumé du portefeuille ---
-# --- Résumé du portefeuille ---
 st.subheader("Résumé global")
-col1, col2, col3, col4, col5 = st.columns(5)  # Ajout d'une colonne pour la volatilité moyenne
+
+# Récupère les secteurs et pays
+sector_country_info = get_asset_sector_and_country(df_valid["ticker"].tolist())
+sectors = sector_country_info['sectors']
+countries = sector_country_info['countries']
+
+# Calcule les scores de diversification
+sector_score, geo_score = calculate_diversification_score(df_valid, sectors, countries)
+
+col1, col2, col3, col4, col5, col6, col7 = st.columns(7)
 total_valeur = df_valid['Valeur actuelle'].sum()
 total_investi = df_valid['Investi'].sum()
 total_gain = df_valid['Gain/Perte ($)'].sum()
@@ -281,12 +336,25 @@ with col4:
     st.metric("Meilleur actif", best_performer["ticker"], f"{best_performer['Gain/Perte (%)']:+.2f}%")
 with col5:
     st.metric("Volatilité moyenne", f"{volatilite_moyenne:.2f}%")
+with col6:
+    st.metric("Diversification sectorielle", f"{sector_score:.1f}%")
+with col7:
+    st.metric("Diversification géographique", f"{geo_score:.1f}%")
+
 
 st.markdown("---")
 
 # --- Affichage des données ---
 st.subheader("Détails des positions")
 df_display = df_valid.sort_values("Valeur actuelle", ascending=False)
+
+def color_positive_negative(val):
+    if isinstance(val, (int, float)):
+        if val > 0:
+            return 'color: #4ade80'  # Vert clair
+        elif val < 0:
+            return 'color: #fb7185'  # Rouge clair
+    return 'color: white'
 
 st.dataframe(
     df_display[["ticker", "Nom", "quantity", "pru", "Dernier prix", "Valeur actuelle", "Poids (%)",
@@ -301,8 +369,7 @@ st.dataframe(
         "Gain/Perte (%)": "{:+.2f}%",
         "Volatilité (%)": "{:.2f}%"
     })
-    .background_gradient(cmap="RdYlGn", subset=["Gain/Perte (%)"], axis=0)
-    .background_gradient(cmap="Blues", subset=["Poids (%)"], axis=0),
+    .applymap(color_positive_negative, subset=["Gain/Perte (%)", "Gain/Perte ($)"]),
     width='stretch',
     hide_index=True
 )
@@ -393,6 +460,15 @@ with tab_fees:
         with col_f3:
             highest_fee = df_with_fees.loc[df_with_fees['Frais annuels ($)'].idxmax()]
             st.metric("Plus élevé", highest_fee['Ticker'], f"${highest_fee['Frais annuels ($)']:,.2f}")
+
+
+        def color_fees(val):
+            if isinstance(val, (int, float)):
+                if val > 0:
+                    return 'color: #fb7185'  # Rouge clair
+            return 'color: white'
+
+
         st.dataframe(
             df_with_fees[['Ticker', 'Valeur', 'Frais de gestion (%)', 'Frais annuels ($)']]
             .style.format({
@@ -400,10 +476,49 @@ with tab_fees:
                 'Frais de gestion (%)': '{:.3%}',
                 'Frais annuels ($)': '${:,.2f}'
             })
-            .background_gradient(cmap="Reds", subset=['Frais annuels ($)'], axis=0),
+            .applymap(color_fees, subset=['Frais annuels ($)']),
             width='stretch',
             hide_index=True
         )
+
+# --- Récapitulatif des secteurs et pays ---
+st.markdown("---")
+st.subheader("Diversification")
+
+# Secteurs
+sector_weights = {}
+for ticker in df_valid['ticker']:
+    sector = sectors.get(ticker, 'Inconnu')
+    weight = df_valid[df_valid['ticker'] == ticker]['Poids (%)'].iloc[0]
+    sector_weights[sector] = sector_weights.get(sector, 0) + weight
+
+# Pays
+country_weights = {}
+for ticker in df_valid['ticker']:
+    country = countries.get(ticker, 'Inconnu')
+    weight = df_valid[df_valid['ticker'] == ticker]['Poids (%)'].iloc[0]
+    country_weights[country] = country_weights.get(country, 0) + weight
+
+col_sector, col_country = st.columns(2)
+
+with col_sector:
+    st.write("### Répartition sectorielle")
+    sector_df = pd.DataFrame.from_dict(sector_weights, orient='index', columns=['Poids (%)'])
+    st.dataframe(
+        sector_df.style.format({"Poids (%)": "{:.1f}%"}),
+        width='stretch',
+        hide_index=False
+    )
+
+with col_country:
+    st.write("### Répartition géographique")
+    country_df = pd.DataFrame.from_dict(country_weights, orient='index', columns=['Poids (%)'])
+    st.dataframe(
+        country_df.style.format({"Poids (%)": "{:.1f}%"}),
+        width='stretch',
+        hide_index=False
+    )
+
 
 with tab_div:
     df_with_div = df_fees[df_fees['Dividendes annuels totaux ($)'].notna()].copy()
@@ -419,6 +534,15 @@ with tab_div:
             st.metric("Rendement moyen", f"{avg_yield:.2f}%")
         with col_d3:
             st.metric("Revenus mensuels estimés", f"${total_dividends / 12:,.2f}")
+
+
+        def color_dividends(val):
+            if isinstance(val, (int, float)):
+                if val > 0:
+                    return 'color: #4ade80'  # Vert clair
+            return 'color: white'
+
+
         st.dataframe(
             df_with_div[['Ticker', 'Valeur', 'Rendement dividende (%)', 'Dividende annuel/action ($)',
                          'Dividendes annuels totaux ($)', 'Taux de distribution (%)']]
@@ -429,7 +553,7 @@ with tab_div:
                 'Dividendes annuels totaux ($)': '${:.2f}',
                 'Taux de distribution (%)': '{:.2%}'
             })
-            .background_gradient(cmap="Greens", subset=['Dividendes annuels totaux ($)'], axis=0),
+            .applymap(color_dividends, subset=['Dividendes annuels totaux ($)', 'Rendement dividende (%)']),
             width='stretch',
             hide_index=True
         )

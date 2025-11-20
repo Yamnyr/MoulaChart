@@ -391,60 +391,124 @@ if tickers:
         with tab1:
             perf_cols = ["Prix initial ($)", "Prix final ($)", "Plus haut ($)", "Plus bas ($)",
                          "Performance totale (%)", "Performance annualisée (%)", "Jours positifs (%)"]
+
+
+            def color_positive_negative(val):
+                color = 'green' if val > 0 else 'red' if val < 0 else 'white'
+                return f'color: {color}'
+
+
+            def color_percentage(val):
+                if pd.isna(val):
+                    return 'color: white'
+                elif val > 0:
+                    return 'color: #4ade80'  # Vert clair
+                elif val < 0:
+                    return 'color: #fb7185'  # Rouge clair
+                else:
+                    return 'color: white'
+
+
             st.dataframe(
                 perf[perf_cols].style.format("{:.2f}")
-                .background_gradient(cmap="Blues",
-                                     subset=["Prix initial ($)", "Prix final ($)", "Plus haut ($)", "Plus bas ($)"],
-                                     axis=0)
-                .background_gradient(cmap="RdYlGn", subset=["Performance totale (%)", "Performance annualisée (%)",
-                                                            "Jours positifs (%)"], axis=0),
+                .applymap(color_percentage, subset=["Performance totale (%)", "Performance annualisée (%)"])
+                .applymap(color_positive_negative, subset=["Jours positifs (%)"]),
                 width='stretch'
             )
 
         with tab2:
             risk_cols = ["Volatilité annualisée (%)", "Ratio Sharpe", "Ratio Sortino",
                          "Drawdown max (%)", "Meilleur jour (%)", "Pire jour (%)"]
+
+
+            def color_volatility(val):
+                if pd.isna(val):
+                    return 'color: white'
+                elif val > 30:
+                    return 'color: #fb7185'  # Rouge clair
+                elif val > 20:
+                    return 'color: #fbbf24'  # Orange
+                else:
+                    return 'color: #4ade80'  # Vert clair
+
+
+            def color_ratio(val):
+                if pd.isna(val):
+                    return 'color: white'
+                elif val > 1:
+                    return 'color: #4ade80'  # Vert clair
+                elif val > 0:
+                    return 'color: #a78bfa'  # Violet clair
+                else:
+                    return 'color: #fb7185'  # Rouge clair
+
+
+            def color_drawdown(val):
+                if pd.isna(val):
+                    return 'color: white'
+                elif val < 0:
+                    return 'color: #fb7185'  # Rouge clair
+                else:
+                    return 'color: #4ade80'  # Vert clair
+
+
             st.dataframe(
                 perf[risk_cols].style.format("{:.2f}")
-                .background_gradient(cmap="YlOrRd", subset=["Volatilité annualisée (%)"], axis=0)
-                .background_gradient(cmap="RdYlGn", subset=["Ratio Sharpe", "Ratio Sortino", "Meilleur jour (%)"],
-                                     axis=0)
-                .background_gradient(cmap="RdYlGn_r", subset=["Drawdown max (%)", "Pire jour (%)"], axis=0),
+                .applymap(color_volatility, subset=["Volatilité annualisée (%)"])
+                .applymap(color_ratio, subset=["Ratio Sharpe", "Ratio Sortino"])
+                .applymap(color_drawdown, subset=["Drawdown max (%)", "Pire jour (%)"])
+                .applymap(color_positive_negative, subset=["Meilleur jour (%)"]),
                 width='stretch'
             )
 
         with tab3:
             detail_cols = ["Rendement moyen (%)", "Rendement médian (%)", "Gain moyen (%)",
                            "Perte moyenne (%)", "Ratio Gain/Perte"]
+
+
+            def color_mean_median(val):
+                if pd.isna(val):
+                    return 'color: white'
+                elif val > 0:
+                    return 'color: #4ade80'  # Vert clair
+                else:
+                    return 'color: #fb7185'  # Rouge clair
+
+
+            def color_gain_loss(val):
+                if pd.isna(val):
+                    return 'color: white'
+                elif val > 0:
+                    return 'color: #4ade80'  # Vert clair
+                else:
+                    return 'color: #fb7185'  # Rouge clair
+
+
             st.dataframe(
                 perf[detail_cols].style.format("{:.2f}")
-                .background_gradient(cmap="RdYlGn",
-                                     subset=["Rendement moyen (%)", "Rendement médian (%)", "Gain moyen (%)",
-                                             "Ratio Gain/Perte"], axis=0)
-                .background_gradient(cmap="RdYlGn_r", subset=["Perte moyenne (%)"], axis=0),
+                .applymap(color_mean_median, subset=["Rendement moyen (%)", "Rendement médian (%)", "Gain moyen (%)"])
+                .applymap(color_gain_loss, subset=["Perte moyenne (%)"])
+                .applymap(color_ratio, subset=["Ratio Gain/Perte"]),
                 width='stretch'
             )
-
 
         # --- Visualisations supplémentaires ---
         st.markdown("---")
         col_stat1, col_stat2 = st.columns(2)
-
         with col_stat1:
             st.markdown("### Classement Performance")
             ranking = perf[["Performance totale (%)"]].sort_values("Performance totale (%)", ascending=False)
             st.dataframe(
                 ranking.style.format("{:.2f}")
-                .background_gradient(cmap="RdYlGn", axis=0),
+                .applymap(color_percentage, subset=["Performance totale (%)"]),
                 width='stretch'
             )
-
         with col_stat2:
             st.markdown("### Classement Stabilité")
             risk_ranking = perf[["Volatilité annualisée (%)"]].sort_values("Volatilité annualisée (%)", ascending=True)
             st.dataframe(
                 risk_ranking.style.format("{:.2f}")
-                .background_gradient(cmap="RdYlGn", axis=0),
+                .applymap(color_volatility, subset=["Volatilité annualisée (%)"]),
                 width='stretch'
             )
 
@@ -453,14 +517,13 @@ if tickers:
         st.markdown("### Efficience (Rendement/Risque)")
         perf["Ratio Rend/Risque"] = perf["Performance totale (%)"] / perf["Volatilité annualisée (%)"].replace(0, float(
             "nan"))
-
         ratio_ranking = perf[["Performance totale (%)", "Volatilité annualisée (%)", "Ratio Rend/Risque"]].sort_values(
             "Ratio Rend/Risque", ascending=False)
         st.dataframe(
             ratio_ranking.style.format("{:.2f}")
-            .background_gradient(cmap="RdYlGn", subset=["Performance totale (%)"], axis=0)
-            .background_gradient(cmap="YlOrRd", subset=["Volatilité annualisée (%)"], axis=0)
-            .background_gradient(cmap="RdYlGn", subset=["Ratio Rend/Risque"], axis=0),
+            .applymap(color_percentage, subset=["Performance totale (%)"])
+            .applymap(color_volatility, subset=["Volatilité annualisée (%)"])
+            .applymap(color_ratio, subset=["Ratio Rend/Risque"]),
             width='stretch'
         )
 
