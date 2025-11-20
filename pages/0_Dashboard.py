@@ -13,35 +13,49 @@ st.set_page_config(page_title="📈 MoulaChart", page_icon="📊", layout="wide"
 # --- Charger la liste des tickers dynamiquement ---
 @st.cache_data
 def get_tickers(source="S&P 500"):
-    """Récupère les tickers selon la source choisie"""
+    """Récupère les tickers selon la source choisie avec détection automatique des colonnes."""
+
     if source == "S&P 500":
         url = "https://en.wikipedia.org/wiki/List_of_S%26P_500_companies"
-        html_content = requests.get(url, headers={'User-Agent': 'Mozilla/5.0'}).text
-        table = pd.read_html(StringIO(html_content))[0]
-        tickers = table["Symbol"].tolist()
-        names = table["Security"].tolist()
     elif source == "NASDAQ 100":
         url = "https://en.wikipedia.org/wiki/NASDAQ-100"
-        html_content = requests.get(url, headers={'User-Agent': 'Mozilla/5.0'}).text
-        table = pd.read_html(StringIO(html_content))[4]
-        tickers = table["Ticker"].tolist()
-        names = table["Company"].tolist()
     elif source == "CAC 40":
         url = "https://en.wikipedia.org/wiki/CAC_40"
-        html_content = requests.get(url, headers={'User-Agent': 'Mozilla/5.0'}).text
-        table = pd.read_html(StringIO(html_content))[4]
-        tickers = table["Ticker"].tolist()
-        names = table["Company"].tolist()
+
+    html_content = requests.get(url, headers={'User-Agent': 'Mozilla/5.0'}).text
+    tables = pd.read_html(StringIO(html_content))
+
+    # Trouver le tableau contenant les tickers
+    table = None
+    for t in tables:
+        cols = [c.lower() for c in t.columns.astype(str)]
+        if any("symbol" in c or "ticker" in c for c in cols):
+            table = t
+            break
+
+    if table is None:
+        raise ValueError("Impossible de trouver un tableau contenant les tickers.")
+
+    # Détection automatique des colonnes ticker / nom
+    cols = {c.lower(): c for c in table.columns.astype(str)}
+
+    ticker_col = next(c for c in cols if "symbol" in c or "ticker" in c)
+    name_col = next(c for c in cols if "security" in c or "company" in c or "name" in c)
+
+    tickers = table[cols[ticker_col]].astype(str).tolist()
+    names = table[cols[name_col]].astype(str).tolist()
+
+    # Ajouter .PA pour le CAC 40
+    if source == "CAC 40":
         tickers = [t + ".PA" if not t.endswith(".PA") else t for t in tickers]
 
-    mapping = dict(zip(tickers, names))
-    return tickers, mapping
+    return tickers, dict(zip(tickers, names))
 
 
 # --- Dictionnaires FR -> valeurs pour yfinance ---
 PERIODS = {
     "1 mois": "1mo", "3 mois": "3mo", "6 mois": "6mo", "1 an": "1y",
-    "2 ans": "2y", "5 ans": "5y", "10 ans": "10y", "Max": "max",
+    "2 ans": "2y", "5 ans": "5y", "10 ans": "10y",
 }
 
 INTERVALS = {"1 jour": "1d", "1 semaine": "1wk", "1 mois": "1mo"}
@@ -310,6 +324,36 @@ if tickers:
 
         for t in tickers_for_stats:
             returns = data[t].pct_change().dropna()
+
+            # Empêcher les divisions par zéro si l'actif n'a pas assez d'historique
+            if len(returns) == 0:
+                perf.loc[t, "Prix initial ($)"] = data[t].iloc[0]
+                perf.loc[t, "Prix final ($)"] = data[t].iloc[-1]
+                perf.loc[t, "Plus haut ($)"] = data[t].max()
+                perf.loc[t, "Plus bas ($)"] = data[t].min()
+                perf.loc[t, "Performance totale (%)"] = (data[t].iloc[-1] / data[t].iloc[0] - 1) * 100
+
+                # toutes les métriques basées sur returns -> NaN
+                perf.loc[t, "Performance annualisée (%)"] = float("nan")
+                perf.loc[t, "Volatilité quotidienne (%)"] = float("nan")
+                perf.loc[t, "Volatilité annualisée (%)"] = float("nan")
+                perf.loc[t, "Rendement moyen (%)"] = float("nan")
+                perf.loc[t, "Rendement médian (%)"] = float("nan")
+                perf.loc[t, "Ratio Sharpe"] = float("nan")
+                perf.loc[t, "Ratio Sortino"] = float("nan")
+                perf.loc[t, "Drawdown max (%)"] = float("nan")
+                perf.loc[t, "Drawdown actuel (%)"] = float("nan")
+                perf.loc[t, "Skewness"] = float("nan")
+                perf.loc[t, "Kurtosis"] = float("nan")
+                perf.loc[t, "Jours positifs (%)"] = float("nan")
+                perf.loc[t, "Gain moyen (%)"] = float("nan")
+                perf.loc[t, "Perte moyenne (%)"] = float("nan")
+                perf.loc[t, "Meilleur jour (%)"] = float("nan")
+                perf.loc[t, "Pire jour (%)"] = float("nan")
+                perf.loc[t, "Ratio Gain/Perte"] = float("nan")
+
+                continue
+
             running_max = data[t].cummax()
             drawdown = (data[t] / running_max - 1) * 100
 
@@ -341,57 +385,6 @@ if tickers:
 
         if compare_index and index_ticker in perf.index:
             perf = perf.rename(index={index_ticker: index_name})
-
-        # Onglets avec dégradés de couleurs harmonieux
-        # tab1, tab2, tab3, tab4 = st.tabs(["Vue d'ensemble", "Prix & Performance", "Risque", "Distribution"])
-        #
-        # with tab1:
-        #     overview_cols = ["Performance totale (%)", "Performance annualisée (%)", "Volatilité annualisée (%)",
-        #                      "Ratio Sharpe", "Drawdown max (%)", "Jours positifs (%)"]
-        #     st.dataframe(
-        #         perf[overview_cols].style.format("{:.2f}")
-        #         .background_gradient(cmap="RdYlGn", subset=["Performance totale (%)", "Performance annualisée (%)"], axis=0)
-        #         .background_gradient(cmap="YlOrRd", subset=["Volatilité annualisée (%)"], axis=0)
-        #         .background_gradient(cmap="RdYlGn", subset=["Ratio Sharpe", "Jours positifs (%)"], axis=0)
-        #         .background_gradient(cmap="RdYlGn_r", subset=["Drawdown max (%)"], axis=0),
-        #         width='stretch'
-        #     )
-        #
-        # with tab2:
-        #     price_cols = ["Prix initial ($)", "Prix final ($)", "Plus haut ($)", "Plus bas ($)",
-        #                   "Performance totale (%)", "Performance annualisée (%)", "Rendement moyen (%)",
-        #                   "Rendement médian (%)"]
-        #     st.dataframe(
-        #         perf[price_cols].style.format("{:.2f}")
-        #         .background_gradient(cmap="Blues", subset=["Prix initial ($)", "Prix final ($)", "Plus haut ($)", "Plus bas ($)"], axis=0)
-        #         .background_gradient(cmap="RdYlGn", subset=["Performance totale (%)", "Performance annualisée (%)", "Rendement moyen (%)", "Rendement médian (%)"], axis=0),
-        #         width='stretch'
-        #     )
-        #
-        # with tab3:
-        #     risk_cols = ["Volatilité quotidienne (%)", "Volatilité annualisée (%)", "Ratio Sharpe", "Ratio Sortino",
-        #                  "Drawdown max (%)", "Drawdown actuel (%)", "Meilleur jour (%)", "Pire jour (%)"]
-        #     st.dataframe(
-        #         perf[risk_cols].style.format("{:.2f}")
-        #         .background_gradient(cmap="YlOrRd", subset=["Volatilité quotidienne (%)", "Volatilité annualisée (%)"], axis=0)
-        #         .background_gradient(cmap="RdYlGn", subset=["Ratio Sharpe", "Ratio Sortino"], axis=0)
-        #         .background_gradient(cmap="RdYlGn_r", subset=["Drawdown max (%)", "Drawdown actuel (%)"], axis=0)
-        #         .background_gradient(cmap="RdYlGn", subset=["Meilleur jour (%)"], axis=0)
-        #         .background_gradient(cmap="RdYlGn_r", subset=["Pire jour (%)"], axis=0),
-        #         width='stretch'
-        #     )
-        #
-        # with tab4:
-        #     dist_cols = ["Jours positifs (%)", "Gain moyen (%)", "Perte moyenne (%)",
-        #                  "Ratio Gain/Perte", "Skewness", "Kurtosis"]
-        #     st.dataframe(
-        #         perf[dist_cols].style.format("{:.2f}")
-        #         .background_gradient(cmap="RdYlGn", subset=["Jours positifs (%)", "Gain moyen (%)", "Ratio Gain/Perte"], axis=0)
-        #         .background_gradient(cmap="RdYlGn_r", subset=["Perte moyenne (%)"], axis=0)
-        #         .background_gradient(cmap="RdBu_r", subset=["Skewness"], axis=0)
-        #         .background_gradient(cmap="PuOr", subset=["Kurtosis"], axis=0),
-        #         width='stretch'
-        #     )
 
         tab1, tab2, tab3 = st.tabs(["Performance", "Risque & Ratios", "Détails"])
 
@@ -458,7 +451,9 @@ if tickers:
         # --- Ratio rendement/risque ---
         st.markdown("---")
         st.markdown("### Efficience (Rendement/Risque)")
-        perf["Ratio Rend/Risque"] = perf["Performance totale (%)"] / perf["Volatilité annualisée (%)"]
+        perf["Ratio Rend/Risque"] = perf["Performance totale (%)"] / perf["Volatilité annualisée (%)"].replace(0, float(
+            "nan"))
+
         ratio_ranking = perf[["Performance totale (%)", "Volatilité annualisée (%)", "Ratio Rend/Risque"]].sort_values(
             "Ratio Rend/Risque", ascending=False)
         st.dataframe(
@@ -475,6 +470,10 @@ if tickers:
         scatter_data = perf.reset_index()
         scatter_data.columns = ["Ticker"] + list(scatter_data.columns[1:])
 
+        # Normalisation de la taille des bulles
+        perf_abs = scatter_data["Performance totale (%)"].abs()
+        size = 10 + 40 * (perf_abs - perf_abs.min()) / (perf_abs.max() - perf_abs.min() + 1e-9)
+
         fig_scatter = go.Figure()
         fig_scatter.add_trace(go.Scatter(
             x=scatter_data["Volatilité annualisée (%)"],
@@ -484,7 +483,7 @@ if tickers:
             textposition='top center',
             textfont=dict(size=12, color='white'),
             marker=dict(
-                size=scatter_data["Performance totale (%)"].abs() + 10,
+                size=size,
                 color=scatter_data["Performance totale (%)"],
                 colorscale='RdYlGn',
                 showscale=True,
