@@ -9,3 +9,4 @@ yahooquery
 sqlalchemy
 psycopg2-binary
 streamlit-searchbox
+authlib
