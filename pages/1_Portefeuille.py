@@ -4,7 +4,7 @@ import pandas as pd
 import yfinance as yf
 from yahooquery import search as yq_search
 from datetime import datetime
-from supabase import create_client, Client
+from sqlalchemy import text
 from streamlit_searchbox import st_searchbox
 import plotly.express as px
 import plotly.graph_objects as go
@@ -19,19 +19,8 @@ if not st.user.is_logged_in:
     st.button("Se connecter avec Google", on_click=st.login)
     st.stop()
 
-# --- Connexion à la base Supabase ---
-@st.cache_resource
-def init_supabase() -> Client:
-    """Initialise et retourne le client Supabase."""
-    try:
-        url = st.secrets["supabase"]["url"]
-        key = st.secrets["supabase"]["key"]
-        return create_client(url, key)
-    except Exception as e:
-        st.error(f"❌ Erreur de connexion à Supabase : {str(e)}")
-        st.stop()
-
-supabase = init_supabase()
+# --- Connexion à la base Neon (PostgreSQL) ---
+conn = st.connection("postgresql", type="sql")
 
 # --- Fonctions utilitaires ---
 @st.cache_data(ttl=3600)
@@ -229,19 +218,27 @@ with st.sidebar:
                 st.error(f"❌ Le ticker '{ticker}' n'est pas valide")
             else:
                 try:
-                    existing = supabase.table("portfolio").select("*") \
-                        .eq("user_email", st.user.email).eq("ticker", ticker).execute()
-                    if existing.data:
+                    existing = conn.query(
+                        "SELECT * FROM portfolio WHERE user_email = :email AND ticker = :ticker",
+                        params={"email": st.user.email, "ticker": ticker},
+                        ttl=0
+                    )
+                    if not existing.empty:
                         st.warning(f"⚠️ {ticker} existe déjà dans votre portefeuille.")
                     else:
-                        data = {
-                            "user_email": st.user.email,
-                            "ticker": ticker,
-                            "quantity": quantity,
-                            "pru": pru,
-                            "date_added": datetime.now().strftime("%Y-%m-%d"),
-                        }
-                        supabase.table("portfolio").insert(data).execute()
+                        with conn.session as session:
+                            session.execute(
+                                text("INSERT INTO portfolio (user_email, ticker, quantity, pru, date_added) "
+                                     "VALUES (:email, :ticker, :qty, :pru, :date)"),
+                                {
+                                    "email": st.user.email,
+                                    "ticker": ticker,
+                                    "qty": quantity,
+                                    "pru": pru,
+                                    "date": datetime.now().strftime("%Y-%m-%d"),
+                                }
+                            )
+                            session.commit()
                         st.success(f"✅ {ticker} ({name}) ajouté !")
                         st.rerun()
                 except Exception as e:
@@ -249,11 +246,13 @@ with st.sidebar:
     st.markdown("---")
     st.sidebar.success(f"Connecté en tant que {st.user.name or st.user.email}")
     st.sidebar.button("Se déconnecter", on_click=st.logout, width='stretch')
+    if st.sidebar.button("🔄 Actualiser les données", width='stretch'):
+        st.cache_data.clear()
+        st.rerun()
 
 # --- Lecture du portefeuille utilisateur ---
 try:
-    response = supabase.table("portfolio").select("*").eq("user_email", st.user.email).execute()
-    df = pd.DataFrame(response.data)
+    df = conn.query("SELECT * FROM portfolio WHERE user_email = :email", params={"email": st.user.email}, ttl=0)
 except Exception as e:
     st.error(f"❌ Erreur lors de la lecture du portefeuille : {str(e)}")
     st.stop()
@@ -369,7 +368,7 @@ st.dataframe(
         "Gain/Perte (%)": "{:+.2f}%",
         "Volatilité (%)": "{:.2f}%"
     })
-    .applymap(color_positive_negative, subset=["Gain/Perte (%)", "Gain/Perte ($)"]),
+    .map(color_positive_negative, subset=["Gain/Perte (%)", "Gain/Perte ($)"]),
     width='stretch',
     hide_index=True
 )
@@ -476,7 +475,7 @@ with tab_fees:
                 'Frais de gestion (%)': '{:.3%}',
                 'Frais annuels ($)': '${:,.2f}'
             })
-            .applymap(color_fees, subset=['Frais annuels ($)']),
+            .map(color_fees, subset=['Frais annuels ($)']),
             width='stretch',
             hide_index=True
         )
@@ -553,7 +552,7 @@ with tab_div:
                 'Dividendes annuels totaux ($)': '${:.2f}',
                 'Taux de distribution (%)': '{:.2%}'
             })
-            .applymap(color_dividends, subset=['Dividendes annuels totaux ($)', 'Rendement dividende (%)']),
+            .map(color_dividends, subset=['Dividendes annuels totaux ($)', 'Rendement dividende (%)']),
             width='stretch',
             hide_index=True
         )
@@ -577,9 +576,13 @@ with tab1:
                 st.error("Valeurs invalides")
             else:
                 try:
-                    supabase.table("portfolio").update({"quantity": new_qty, "pru": new_pru}).eq("user_email",
-                                                                                                     st.user.email).eq(
-                        "ticker", edit_ticker).execute()
+                    with conn.session as session:
+                        session.execute(
+                            text("UPDATE portfolio SET quantity = :qty, pru = :pru "
+                                 "WHERE user_email = :email AND ticker = :ticker"),
+                            {"qty": new_qty, "pru": new_pru, "email": st.user.email, "ticker": edit_ticker}
+                        )
+                        session.commit()
                     st.success(f"✓ {edit_ticker} mis à jour")
                     st.rerun()
                 except Exception as e:
@@ -592,8 +595,12 @@ with tab2:
         st.warning(f"⚠️ Supprimer {delete_ticker} ({info['quantity']} unités)")
         if st.button("Confirmer", type="primary",  width='stretch'):
             try:
-                supabase.table("portfolio").delete().eq("user_email", st.user.email).eq("ticker",
-                                                                                        delete_ticker).execute()
+                with conn.session as session:
+                    session.execute(
+                        text("DELETE FROM portfolio WHERE user_email = :email AND ticker = :ticker"),
+                        {"email": st.user.email, "ticker": delete_ticker}
+                    )
+                    session.commit()
                 st.success(f"✓ {delete_ticker} supprimé")
                 st.rerun()
             except Exception as e:

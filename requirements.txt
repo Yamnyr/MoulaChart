@@ -6,6 +6,6 @@ requests
 lxml
 matplotlib
 yahooquery
-supabase
+sqlalchemy
+psycopg2-binary
 streamlit-searchbox
-authlib
