@@ -9,7 +9,8 @@ from streamlit_searchbox import st_searchbox
 import plotly.express as px
 import plotly.graph_objects as go
 
-
+# --- Configuration de la page ---
+st.set_page_config(page_title="Mon Portefeuille", page_icon="💼", layout="wide")
 
 
 # --- Authentification requise ---
