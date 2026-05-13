@@ -17,7 +17,7 @@ st.set_page_config(page_title="Mon Portefeuille", page_icon="💼", layout="wide
 if not st.user.is_logged_in:
     st.title("💼 Mon Portefeuille")
     st.warning("🔒 Vous devez être connecté pour accéder à votre portefeuille.")
-    st.button("Se connecter avec Google", on_click=st.login, args=["google"])
+    st.button("Se connecter avec Google", on_click=st.login)
     st.stop()
 
 # --- Connexion à la base Neon (PostgreSQL) ---
