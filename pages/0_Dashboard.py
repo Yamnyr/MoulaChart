@@ -411,8 +411,8 @@ if tickers:
 
             st.dataframe(
                 perf[perf_cols].style.format("{:.2f}")
-                .applymap(color_percentage, subset=["Performance totale (%)", "Performance annualisée (%)"])
-                .applymap(color_positive_negative, subset=["Jours positifs (%)"]),
+                .map(color_percentage, subset=["Performance totale (%)", "Performance annualisée (%)"])
+                .map(color_positive_negative, subset=["Jours positifs (%)"]),
                 width='stretch'
             )
 
@@ -454,10 +454,10 @@ if tickers:
 
             st.dataframe(
                 perf[risk_cols].style.format("{:.2f}")
-                .applymap(color_volatility, subset=["Volatilité annualisée (%)"])
-                .applymap(color_ratio, subset=["Ratio Sharpe", "Ratio Sortino"])
-                .applymap(color_drawdown, subset=["Drawdown max (%)", "Pire jour (%)"])
-                .applymap(color_positive_negative, subset=["Meilleur jour (%)"]),
+                .map(color_volatility, subset=["Volatilité annualisée (%)"])
+                .map(color_ratio, subset=["Ratio Sharpe", "Ratio Sortino"])
+                .map(color_drawdown, subset=["Drawdown max (%)", "Pire jour (%)"])
+                .map(color_positive_negative, subset=["Meilleur jour (%)"]),
                 width='stretch'
             )
 
@@ -486,9 +486,9 @@ if tickers:
 
             st.dataframe(
                 perf[detail_cols].style.format("{:.2f}")
-                .applymap(color_mean_median, subset=["Rendement moyen (%)", "Rendement médian (%)", "Gain moyen (%)"])
-                .applymap(color_gain_loss, subset=["Perte moyenne (%)"])
-                .applymap(color_ratio, subset=["Ratio Gain/Perte"]),
+                .map(color_mean_median, subset=["Rendement moyen (%)", "Rendement médian (%)", "Gain moyen (%)"])
+                .map(color_gain_loss, subset=["Perte moyenne (%)"])
+                .map(color_ratio, subset=["Ratio Gain/Perte"]),
                 width='stretch'
             )
 
@@ -500,7 +500,7 @@ if tickers:
             ranking = perf[["Performance totale (%)"]].sort_values("Performance totale (%)", ascending=False)
             st.dataframe(
                 ranking.style.format("{:.2f}")
-                .applymap(color_percentage, subset=["Performance totale (%)"]),
+                .map(color_percentage, subset=["Performance totale (%)"]),
                 width='stretch'
             )
         with col_stat2:
@@ -508,7 +508,7 @@ if tickers:
             risk_ranking = perf[["Volatilité annualisée (%)"]].sort_values("Volatilité annualisée (%)", ascending=True)
             st.dataframe(
                 risk_ranking.style.format("{:.2f}")
-                .applymap(color_volatility, subset=["Volatilité annualisée (%)"]),
+                .map(color_volatility, subset=["Volatilité annualisée (%)"]),
                 width='stretch'
             )
 
@@ -521,9 +521,9 @@ if tickers:
             "Ratio Rend/Risque", ascending=False)
         st.dataframe(
             ratio_ranking.style.format("{:.2f}")
-            .applymap(color_percentage, subset=["Performance totale (%)"])
-            .applymap(color_volatility, subset=["Volatilité annualisée (%)"])
-            .applymap(color_ratio, subset=["Ratio Rend/Risque"]),
+            .map(color_percentage, subset=["Performance totale (%)"])
+            .map(color_volatility, subset=["Volatilité annualisée (%)"])
+            .map(color_ratio, subset=["Ratio Rend/Risque"]),
             width='stretch'
         )
 

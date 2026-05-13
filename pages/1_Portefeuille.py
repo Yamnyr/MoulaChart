@@ -24,6 +24,11 @@ if not st.user.is_logged_in:
 conn = st.connection("postgresql", type="sql")
 
 # --- Fonctions utilitaires ---
+def logout():
+    """Déconnexion de l'utilisateur."""
+    st.session_state.clear()
+    st.logout()
+
 @st.cache_data(ttl=3600)
 def validate_ticker(ticker: str) -> tuple[bool, str]:
     """Vérifie si un ticker est valide sur Yahoo Finance."""
@@ -246,7 +251,7 @@ with st.sidebar:
                     st.error(f"❌ Erreur : {str(e)}")
     st.markdown("---")
     st.sidebar.success(f"Connecté en tant que {st.user.name or st.user.email}")
-    st.sidebar.button("Se déconnecter", on_click=st.logout, width='stretch')
+    st.sidebar.button("Se déconnecter", on_click=logout, width='stretch')
     if st.sidebar.button("🔄 Actualiser les données", width='stretch'):
         st.cache_data.clear()
         st.rerun()
