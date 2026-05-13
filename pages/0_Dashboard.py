@@ -532,9 +532,10 @@ if tickers:
         scatter_data = perf.reset_index()
         scatter_data.columns = ["Ticker"] + list(scatter_data.columns[1:])
 
-        # Normalisation de la taille des bulles
-        perf_abs = scatter_data["Performance totale (%)"].abs()
+        # Normalisation de la taille des bulles (gestion des NaN)
+        perf_abs = scatter_data["Performance totale (%)"].abs().fillna(0)
         size = 10 + 40 * (perf_abs - perf_abs.min()) / (perf_abs.max() - perf_abs.min() + 1e-9)
+        size = [s if not pd.isna(s) else 10 for s in size]
 
         fig_scatter = go.Figure()
         fig_scatter.add_trace(go.Scatter(
