@@ -125,12 +125,16 @@ if tickers:
             data = raw_data[["Close"]].rename(columns={"Close": tickers_to_download[0]})
 
     # Normalisation
-    if normalize:
-        data_plot = data / data.iloc[0] * 100
-        ylabel = "Performance (base 100)"
+    if not data.empty:
+        if normalize:
+            data_plot = data / data.iloc[0] * 100
+            ylabel = "Performance (base 100)"
+        else:
+            data_plot = data
+            ylabel = "Prix ($)"
     else:
-        data_plot = data
-        ylabel = "Prix ($)"
+        st.error("❌ Aucune donnée récupérée pour les tickers sélectionnés.")
+        st.stop()
 
     # --- Métriques clés en haut ---
     st.markdown("### Vue d'ensemble")
