@@ -9,5 +9,5 @@ yahooquery
 sqlalchemy
 psycopg2-binary
 streamlit-searchbox
-authlib
-httpx
+authlib>=1.3.2
+httpx>=0.27.0

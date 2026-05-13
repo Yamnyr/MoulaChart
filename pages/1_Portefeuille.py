@@ -9,15 +9,14 @@ from streamlit_searchbox import st_searchbox
 import plotly.express as px
 import plotly.graph_objects as go
 
-# --- Configuration de la page ---
-st.set_page_config(page_title="Mon Portefeuille", page_icon="💼", layout="wide")
+
 
 
 # --- Authentification requise ---
 if not st.user.is_logged_in:
     st.title("💼 Mon Portefeuille")
     st.warning("🔒 Vous devez être connecté pour accéder à votre portefeuille.")
-    st.button("Se connecter avec Google", on_click=st.login)
+    st.button("Se connecter avec Google", on_click=st.login, args=["google"])
     st.stop()
 
 # --- Connexion à la base Neon (PostgreSQL) ---
