@@ -291,6 +291,13 @@ st.markdown("---")
 # ════════════════════════════════════════════════════════════════
 # KPIs
 # ════════════════════════════════════════════════════════════════
+def kpi(col, label, value, delta=None, pos=True):
+    dclass = "metric-delta-pos" if pos else "metric-delta-neg"
+    delta_html = f'<div class="{dclass}">{delta}</div>' if delta else ""
+    col.markdown(f"""<div class="metric-card">
+    <div class="metric-label">{label}</div>
+    <div class="metric-value">{value}</div>{delta_html}</div>""", unsafe_allow_html=True)
+
 c1, c2, c3, c4, c5 = st.columns(5)
 
 kpi(c1, "Total investi", fmt(total_invested, decimals=0))
@@ -586,7 +593,7 @@ with main_tab1:
             if hide_amounts:
                 for col in ["Investi (€)", "Parts", "PRU (€)", "Cours (€)", "Valeur Actuelle (€)", "Plus-value (€)", "Plus-value (%)"]:
                     display_etf[col] = "••••"
-                st.dataframe(display_etf, use_container_width=True, hide_index=True)
+                st.dataframe(display_etf, width="stretch", hide_index=True)
             else:
                 st.dataframe(
                     display_etf.style.format({
@@ -595,7 +602,7 @@ with main_tab1:
                         "Valeur Actuelle (€)": "{:,.2f}",
                         "Plus-value (€)": "{:+.2f}", "Plus-value (%)": "{:+.2f}%"
                     }).background_gradient(subset=["Plus-value (%)"], cmap="RdYlGn", align=0),
-                    use_container_width=True, hide_index=True
+                    width="stretch", hide_index=True
                 )
         else:
             st.info("Aucun actif à afficher.")
@@ -794,10 +801,10 @@ with main_tab2:
         display_show = show.copy()
         if hide_amounts:
             display_show["Montant (€)"] = "••••"
-            st.dataframe(display_show.sort_values("Date", ascending=False), use_container_width=True, hide_index=True)
+            st.dataframe(display_show.sort_values("Date", ascending=False), width="stretch", hide_index=True)
         else:
             st.dataframe(display_show.sort_values("Date", ascending=False).style.format({"Montant (€)": "{:.2f}"}),
-                         use_container_width=True, hide_index=True)
+                         width="stretch", hide_index=True)
 
 # ════════════════════════════════════════════════════════════════
 # TAB 3 — SIMULATEUR IFU (FISC)
