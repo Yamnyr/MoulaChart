@@ -25,6 +25,7 @@ FALLBACK_TICKERS = {
     "IE0002XZSHO1": "WPEA.PA",   # MSCI World PEA (Paris, EUR)
     "FR0011871110": "PUST.PA",   # Nasdaq 100 PEA (Paris, EUR)
     "FR0010342592": "0W9J.IL",   # Nasdaq 2x Lev (London, EUR)
+    "IE00B3WJKG14": "QDVE.DE",   # S&P 500 Info Tech Sector (Xetra, EUR)
 }
 
 # ── Load data ────────────────────────────────────────────────────
