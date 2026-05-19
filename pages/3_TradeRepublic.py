@@ -5,30 +5,16 @@ import plotly.express as px
 from datetime import datetime
 import os
 
-# ── MCC categories ──────────────────────────────────────────────
+# ── MCC categories (Clean plain text) ───────────────────────────
 MCC_CATEGORIES = {
-    "4784": "🛣️ Péages", "4131": "🚌 Transport", "5541": "⛽ Carburant",
-    "5814": "🍔 Restauration rapide", "5812": "🍽️ Restaurants", "5411": "🛒 Alimentation",
-    "5542": "🛒 Alimentation", "5331": "🛒 Alimentation", "5499": "🛒 Alimentation",
-    "7230": "💇 Beauté", "8011": "🏥 Santé", "5912": "🏥 Santé",
-    "5631": "👔 Habillement", "5651": "👔 Habillement",
-    "5941": "🏃 Sport", "5734": "🎮 Loisirs", "7996": "🎭 Loisirs",
-    "5999": "📦 Divers", "5965": "🛍️ E-commerce",
-    "7399": "🔧 Services", "9405": "🏛️ Impôts/Admin", "5462": "🍞 Boulangerie",
-}
-
-ISIN_NAMES = {
-    "IE00B5BMR087": "Core S&P 500",
-    "IE0002XZSHO1": "MSCI World PEA",
-    "FR0011871110": "Nasdaq 100 PEA",
-    "FR0010342592": "Nasdaq 2x Lev",
-}
-
-ETF_COLORS = {
-    "Core S&P 500": "#10b981",
-    "MSCI World PEA": "#3b82f6",
-    "Nasdaq 100 PEA": "#a855f7",
-    "Nasdaq 2x Lev": "#f97316",
+    "4784": "Peages", "4131": "Transport", "5541": "Carburant",
+    "5814": "Restauration rapide", "5812": "Restaurants", "5411": "Alimentation",
+    "5542": "Alimentation", "5331": "Alimentation", "5499": "Alimentation",
+    "7230": "Beaute", "8011": "Sante", "5912": "Sante",
+    "5631": "Habillement", "5651": "Habillement",
+    "5941": "Sport", "5734": "Loisirs", "7996": "Loisirs",
+    "5999": "Divers", "5965": "E-commerce",
+    "7399": "Services", "9405": "Impots/Admin", "5462": "Boulangerie",
 }
 
 # ── Load data ────────────────────────────────────────────────────
@@ -45,29 +31,40 @@ def load_csv(file) -> pd.DataFrame:
     df["mcc_code"] = (df["mcc_code"].astype(str).str.strip()
                       .str.replace(r"\.0$", "", regex=True)
                       .replace("nan", "").replace("", pd.NA))
-    df["category_label"] = df["mcc_code"].map(MCC_CATEGORIES).fillna("📦 Divers")
+    df["category_label"] = df["mcc_code"].map(MCC_CATEGORIES).fillna("Divers")
     
     # Rename DEFAULT -> CTO
     df["account_type"] = df["account_type"].replace("DEFAULT", "CTO")
-    df["etf_name"] = df["symbol"].map(ISIN_NAMES).fillna(df["symbol"])
+    
+    # Dynamic ETF Name Parsing: Use 'name' column if populated, fallback to symbol/ISIN
+    df["etf_name"] = df["name"].fillna(df["symbol"]).fillna("Inconnu")
+    
+    # Clean ETF names to look beautiful in charts
+    df["etf_name"] = df["etf_name"].astype(str).str.replace(r"\s*(USD|EUR)?\s*\(Acc\)\s*", "", regex=True)
+    df["etf_name"] = df["etf_name"].str.replace(r"\s*Swap\s*", " ", regex=True)
+    df["etf_name"] = df["etf_name"].str.replace(r"\s*UCITS ETF\s*", " ", regex=True)
+    df["etf_name"] = df["etf_name"].str.replace(r"iShares VI plc - iShares\s*", "iShares ", regex=True)
+    df["etf_name"] = df["etf_name"].str.replace(r"iShares VII plc - iShares\s*", "iShares ", regex=True)
+    df["etf_name"] = df["etf_name"].str.strip()
+    
     df["month"] = df["date"].dt.to_period("M").astype(str)
     return df
 
 # ── Sidebar ──────────────────────────────────────────────────────
 with st.sidebar:
-    st.title("📊 Trade Republic")
+    st.title("Trade Republic")
     st.markdown("---")
     
     # Toggle to hide amounts
-    hide_amounts = st.toggle("🔒 Masquer les montants", value=False, help="Masque les valeurs numériques sur l'ensemble de la page")
+    hide_amounts = st.toggle("Masquer les montants", value=False, help="Masque les valeurs numériques sur l'ensemble de la page")
     st.markdown("---")
     
     default_path = os.path.join(os.path.dirname(__file__), "..", "Exportation de transactions.csv")
     if os.path.exists(default_path):
-        st.success("✅ Fichier TR détecté automatiquement")
+        st.success("Fichier TR detecte automatiquement")
         uploaded = None
     else:
-        uploaded = st.file_uploader("📂 Importer votre export TR", type=["csv"])
+        uploaded = st.file_uploader("Importer votre export TR (CSV)", type=["csv"])
     st.markdown("---")
     account_filter = st.multiselect("Compte", ["CTO", "PEA"], default=["CTO", "PEA"])
 
@@ -95,16 +92,21 @@ try:
     elif os.path.exists(default_path):
         df = load_csv(default_path)
     else:
-        st.info("📂 Importez votre export Trade Republic pour commencer.")
+        st.info("Importez votre export Trade Republic pour commencer.")
         st.stop()
 except Exception as e:
-    st.error(f"❌ Erreur lecture CSV : {e}")
+    st.error(f"Erreur lecture CSV : {e}")
     st.stop()
 
 df = df[df["account_type"].isin(account_filter)]
 
-# Couleurs compte
+# Colors setup
 ACCOUNT_COLORS = {"CTO": "#10b981", "PEA": "#3b82f6"}
+
+# Dynamic ETF Colors Mapping
+unique_etfs = sorted(df["etf_name"].dropna().unique())
+color_palette = ["#10b981", "#3b82f6", "#a855f7", "#f97316", "#ec4899", "#f59e0b", "#14b8a6", "#6366f1"]
+etf_colors = {name: color_palette[i % len(color_palette)] for i, name in enumerate(unique_etfs)}
 
 # ── Subsets ──────────────────────────────────────────────────────
 buys    = df[(df["type"] == "BUY") & (df["category"] == "TRADING")]
@@ -133,7 +135,7 @@ border-left:4px solid #10b981;padding-left:12px;}
 </style>
 """, unsafe_allow_html=True)
 
-st.markdown("# 📈 Analyse Trade Republic")
+st.markdown("# Analyse Trade Republic")
 st.markdown(f"*{len(df)} transactions · {df['date'].min().strftime('%d/%m/%Y')} → {df['date'].max().strftime('%d/%m/%Y')}*")
 st.markdown("---")
 
@@ -154,20 +156,20 @@ def kpi(col, label, value, delta=None, pos=True):
     <div class="metric-label">{label}</div>
     <div class="metric-value">{value}</div>{delta_html}</div>""", unsafe_allow_html=True)
 
-kpi(c1, "💰 Total investi", fmt(total_invested, decimals=0))
-kpi(c2, "📥 Dépôts totaux", fmt(total_deposited, decimals=0))
-kpi(c3, "🎁 Saveback reçu", fmt(total_saveback), "Cashback TR 1%")
-kpi(c4, "🏦 Intérêts reçus", fmt(total_interest))
-kpi(c5, "💳 Dépenses carte", fmt(total_spent, decimals=0), f"{len(cards)} transactions", False)
+kpi(c1, "Total investi", fmt(total_invested, decimals=0))
+kpi(c2, "Depots totaux", fmt(total_deposited, decimals=0))
+kpi(c3, "Saveback recu", fmt(total_saveback), "Cashback 1%")
+kpi(c4, "Interets recus", fmt(total_interest))
+kpi(c5, "Depenses carte", fmt(total_spent, decimals=0), f"{len(cards)} transactions", False)
 
 # Main Navigation Tabs
-main_tab1, main_tab2, main_tab3 = st.tabs(["📊 Mes Investissements", "💳 Dépenses & Budget", "📑 Simulateur IFU (Fisc)"])
+main_tab1, main_tab2, main_tab3 = st.tabs(["Investissements", "Depenses & Budget", "Simulateur IFU"])
 
 # ════════════════════════════════════════════════════════════════
 # TAB 1 — MES INVESTISSEMENTS
 # ════════════════════════════════════════════════════════════════
 with main_tab1:
-    tab_inv1, tab_inv2, tab_inv3 = st.tabs(["📈 Évolution", "🥧 Répartition", "📋 Détail par ETF"])
+    tab_inv1, tab_inv2, tab_inv3 = st.tabs(["Evolution", "Repartition", "Detail par ETF"])
 
     with tab_inv1:
         col_l, col_r = st.columns([2, 1])
@@ -186,7 +188,7 @@ with main_tab1:
                 fig = go.Figure()
                 for etf in df_cum["etf"].unique():
                     s = df_cum[df_cum["etf"] == etf]
-                    color = ETF_COLORS.get(etf, "#64748b")
+                    color = etf_colors.get(etf, "#64748b")
                     fig.add_trace(go.Scatter(
                         x=s["date"], y=s["cum_invested"], name=etf, mode="lines",
                         line=dict(color=color, width=2.5),
@@ -229,7 +231,7 @@ with main_tab1:
         etf_totals.columns = ["ETF", "Montant"]
 
         with col_a:
-            colors_pie = [ETF_COLORS.get(e, "#64748b") for e in etf_totals["ETF"]]
+            colors_pie = [etf_colors.get(e, "#64748b") for e in etf_totals["ETF"]]
             fig_pie = go.Figure(go.Pie(
                 labels=etf_totals["ETF"], values=etf_totals["Montant"],
                 hole=0.55, marker=dict(colors=colors_pie),
@@ -246,7 +248,7 @@ with main_tab1:
             st.plotly_chart(fig_pie, use_container_width=True)
 
         with col_b:
-            # CTO vs PEA répartition par ETF
+            # Dynamic CTO vs PEA bar chart
             etf_account = buys.groupby(["etf_name", "account_type"])["amount"].apply(
                 lambda x: x.abs().sum()).reset_index()
             etf_account.columns = ["ETF", "Compte", "Investi"]
@@ -276,11 +278,11 @@ with main_tab1:
         pea_total = buys[buys["account_type"] == "PEA"]["amount"].abs().sum()
         grand_total = cto_total + pea_total
         mc1, mc2, mc3 = st.columns(3)
-        mc1.metric("💼 CTO — Total investi", fmt(cto_total, decimals=0),
-                   f"{cto_total/grand_total*100:.1f}% du portefeuille" if grand_total and not hide_amounts else "")
-        mc2.metric("🏦 PEA — Total investi", fmt(pea_total, decimals=0),
-                   f"{pea_total/grand_total*100:.1f}% du portefeuille" if grand_total and not hide_amounts else "")
-        mc3.metric("📊 Total tous comptes", fmt(grand_total, decimals=0))
+        mc1.metric("CTO — Total investi", fmt(cto_total, decimals=0),
+                   f"{cto_total/grand_total*100:.1f}%" if grand_total and not hide_amounts else "")
+        mc2.metric("PEA — Total investi", fmt(pea_total, decimals=0),
+                   f"{pea_total/grand_total*100:.1f}%" if grand_total and not hide_amounts else "")
+        mc3.metric("Total tous comptes", fmt(grand_total, decimals=0))
         st.markdown("---")
         
         etf_detail = buys.groupby(["etf_name", "account_type"]).agg(
@@ -295,10 +297,10 @@ with main_tab1:
         # Mask if requested
         display_etf = etf_detail.copy()
         if hide_amounts:
-            display_etf["Investi (€)"] = "•••• €"
+            display_etf["Investi (€)"] = "••••"
             display_etf["Parts totales"] = "••••"
-            display_etf["Prix moy./part (€)"] = "•••• €"
-            display_etf["Valeur/part actuelle (€)"] = "•••• €"
+            display_etf["Prix moy./part (€)"] = "••••"
+            display_etf["Valeur/part actuelle (€)"] = "••••"
             st.dataframe(display_etf, use_container_width=True, hide_index=True)
         else:
             st.dataframe(
@@ -310,13 +312,13 @@ with main_tab1:
             )
             
         st.markdown("---")
-        st.subheader("🎁 Saveback & Intérêts")
+        st.subheader("Saveback & Interets")
         c1, c2 = st.columns(2)
         with c1:
             sav_monthly = savings.groupby("month")["amount"].sum().reset_index()
             fig_sav = go.Figure(go.Bar(x=sav_monthly["month"], y=sav_monthly["amount"],
                 marker_color="#a855f7",
-                hovertemplate="<b>%{x}</b><br>" + ("•••• €" if hide_amounts else "%{y:.2f} €") + "<extra></extra>"))
+                hovertemplate="<b>%{x}</b><br>" + ("••••" if hide_amounts else "%{y:.2f} €") + "<extra></extra>"))
             fig_sav.update_layout(title="Saveback mensuel (€)", template="plotly_dark",
                 plot_bgcolor="rgba(15,23,42,0.5)", paper_bgcolor="rgba(0,0,0,0)",
                 font=dict(color="#e2e8f0"), height=280,
@@ -326,7 +328,7 @@ with main_tab1:
             int_monthly = interests.groupby("month")["amount"].sum().reset_index()
             fig_int = go.Figure(go.Bar(x=int_monthly["month"], y=int_monthly["amount"],
                 marker_color="#fbbf24",
-                hovertemplate="<b>%{x}</b><br>" + ("•••• €" if hide_amounts else "%{y:.2f} €") + "<extra></extra>"))
+                hovertemplate="<b>%{x}</b><br>" + ("••••" if hide_amounts else "%{y:.2f} €") + "<extra></extra>"))
             fig_int.update_layout(title="Intérêts mensuels (€)", template="plotly_dark",
                 plot_bgcolor="rgba(15,23,42,0.5)", paper_bgcolor="rgba(0,0,0,0)",
                 font=dict(color="#e2e8f0"), height=280,
@@ -337,15 +339,15 @@ with main_tab1:
 # TAB 2 — DÉPENSES
 # ════════════════════════════════════════════════════════════════
 with main_tab2:
-    tab_dep1, tab_dep2, tab_dep3 = st.tabs(["🌊 Sankey", "📅 Par mois", "🏪 Top marchands"])
+    tab_dep1, tab_dep2, tab_dep3 = st.tabs(["Sankey", "Par mois", "Top marchands"])
 
     with tab_dep1:
-        st.markdown("##### Flux de trésorerie — Entrées → Catégories de dépenses")
+        st.markdown("##### Flux de trésorerie — Entrées vers dépenses")
         
         # Detail controller
         sankey_detail = st.radio(
             "Niveau de détail du diagramme de Sankey :",
-            ["🏷️ Catégories uniquement", "🏪 Catégories & Top Marchands"],
+            ["Categories uniquement", "Categories & Top Marchands"],
             horizontal=True
         )
 
@@ -353,7 +355,7 @@ with main_tab2:
         cat_totals = cat_totals[cat_totals > 5].sort_values(ascending=False)
 
         # Build Sankey nodes & links
-        source_node = "💳 Dépenses carte"
+        source_node = "Depenses carte"
         cats = cat_totals.index.tolist()
         
         if "Top Marchands" in sankey_detail:
@@ -430,7 +432,7 @@ with main_tab2:
 
         fig_stack = px.bar(monthly_cats, x="month", y="montant", color="categorie",
                            color_discrete_sequence=px.colors.qualitative.Set3,
-                           labels={"montant": "€", "month": "", "categorie": "Catégorie"})
+                           labels={"montant": "€", "month": "", "categorie": "Categorie"})
         fig_stack.update_layout(
             title="Dépenses par catégorie et par mois",
             template="plotly_dark", plot_bgcolor="rgba(15,23,42,0.5)",
@@ -467,13 +469,13 @@ with main_tab2:
         top20 = (cards_clean.groupby(["merchant_clean", "category_label"])
                  .agg(Total=("amount", lambda x: x.abs().sum()), Nb=("amount", "count"))
                  .reset_index().sort_values("Total", ascending=False).head(20))
-        top20.columns = ["Marchand", "Catégorie", "Total (€)", "Nb transactions"]
+        top20.columns = ["Marchand", "Categorie", "Total (€)", "Nb transactions"]
 
         colors_top = ["#ef4444" if i < 3 else "#f97316" if i < 7 else "#64748b"
                       for i in range(len(top20))]
         fig_top = go.Figure(go.Bar(
             x=top20["Total (€)"][::-1],
-            y=(top20["Marchand"] + " " + top20["Catégorie"])[::-1],
+            y=(top20["Marchand"] + " " + top20["Categorie"])[::-1],
             orientation="h", marker_color=colors_top[::-1],
             hovertemplate="<b>%{y}</b><br>" + ("•••• €" if hide_amounts else "%{x:,.2f} €") + "<extra></extra>"
         ))
@@ -487,7 +489,7 @@ with main_tab2:
         st.plotly_chart(fig_top, use_container_width=True)
 
         st.markdown("---")
-        st.subheader("📋 Toutes les dépenses")
+        st.subheader("Toutes les dépenses")
         col_filter1, col_filter2 = st.columns(2)
         with col_filter1:
             cats_filter = st.multiselect("Filtrer par catégorie", sorted(cards["category_label"].unique()),
@@ -497,12 +499,12 @@ with main_tab2:
                                            default=sorted(cards["month"].unique())[-3:])
         filtered = cards[cards["category_label"].isin(cats_filter) & cards["month"].isin(months_filter)]
         show = filtered[["date", "name", "category_label", "amount"]].copy()
-        show.columns = ["Date", "Marchand", "Catégorie", "Montant (€)"]
+        show.columns = ["Date", "Marchand", "Categorie", "Montant (€)"]
         show["Montant (€)"] = show["Montant (€)"].abs()
         
         display_show = show.copy()
         if hide_amounts:
-            display_show["Montant (€)"] = "•••• €"
+            display_show["Montant (€)"] = "••••"
             st.dataframe(display_show.sort_values("Date", ascending=False), use_container_width=True, hide_index=True)
         else:
             st.dataframe(display_show.sort_values("Date", ascending=False).style.format({"Montant (€)": "{:.2f}"}),
@@ -512,14 +514,14 @@ with main_tab2:
 # TAB 3 — SIMULATEUR IFU (FISC)
 # ════════════════════════════════════════════════════════════════
 with main_tab3:
-    st.markdown("### 📑 Simulateur d'Aide à la Déclaration d'Impôts (IFU)")
+    st.markdown("### Simulateur d'Aide à la Déclaration d'Impôts (IFU)")
     st.markdown("""
-    Puisque **Trade Republic** est un établissement basé en Allemagne (étranger), vous devez déclarer vos intérêts 
+    Puisque Trade Republic est un établissement basé en Allemagne (étranger), vous devez déclarer vos intérêts 
     et votre compte espèces. Ce simulateur extrait les données correspondantes de votre fichier de transactions 
-    pour vous aider à remplir votre déclaration de revenus française (**Formulaire 2042 et 3916**).
+    pour vous aider à remplir votre déclaration de revenus française (Formulaire 2042 et 3916).
     """)
     
-    st.info("💡 **Note Légale** : Ce simulateur est fourni à titre indicatif pour vous aider dans vos démarches fiscales. Les montants calculés correspondent aux transactions détectées dans votre fichier de transactions exporté.")
+    st.info("Note Légale : Ce simulateur est fourni à titre indicatif pour vous aider dans vos démarches fiscales. Les montants calculés correspondent aux transactions détectées dans votre fichier de transactions exporté.")
 
     # Group interests by calendar year
     interests_copy = interests.copy()
@@ -527,14 +529,13 @@ with main_tab3:
     years = sorted(interests_copy["year"].unique(), reverse=True)
     
     if not years:
-        st.warning("⚠️ Aucune transaction d'intérêts rémunérés (INTEREST_PAYMENT) n'a été détectée dans l'export.")
+        st.warning("Aucune transaction d'intérêts rémunérés (INTEREST_PAYMENT) n'a été détectée dans l'export.")
     else:
         for year in years:
-            st.markdown(f"#### 📅 Revenus perçus en **{year}** *(Déclaration en {year+1})*")
+            st.markdown(f"#### Revenus perçus en {year} (Déclaration en {year+1})")
             
             y_interests = interests_copy[interests_copy["year"] == year]
             net_int = y_interests["amount"].sum()
-            # absolute sum of negative taxes
             tax_paid = y_interests["tax"].abs().sum()
             gross_int = net_int + tax_paid
             
@@ -542,7 +543,7 @@ with main_tab3:
             with col_a:
                 st.markdown(f"""
                 <div class="tax-card">
-                    <h5>📋 Formulaire 2042 — Déclaration Principale</h5>
+                    <h5>Formulaire 2042 — Déclaration Principale</h5>
                     <p>Déclarez ces montants dans la section <i>Revenus des valeurs et capitaux mobiliers</i> :</p>
                     <div class="tax-box">
                         <div class="tax-label">Case <b>2TR</b> (Intérêts bruts soumis au barème ou flat tax)</div>
@@ -558,7 +559,7 @@ with main_tab3:
             with col_b:
                 st.markdown(f"""
                 <div class="tax-card" style="border-color: #3b82f6;">
-                    <h5 style="color: #3b82f6;">🏦 Synthèse des Gains Rémunérés</h5>
+                    <h5 style="color: #3b82f6;">Synthèse des Gains Rémunérés</h5>
                     <table style="width:100%; border-collapse: collapse; margin-top: 10px; font-size:13px;">
                         <tr>
                             <td style="padding: 5px 0; color: #9ca3af;">Intérêts Nets encaissés :</td>
@@ -580,23 +581,13 @@ with main_tab3:
                 """, unsafe_allow_html=True)
                 
     st.markdown("---")
-    st.markdown("### 🇩🇪 Formulaire 3916 — Déclaration de Compte à l'Étranger")
+    st.markdown("### Formulaire 3916 — Déclaration de Compte à l'Étranger")
     st.markdown("""
-    Tout compte ouvert à l'étranger doit obligatoirement être déclaré chaque année en même temps que vos revenus via le **formulaire 3916**. 
-    Voici les informations pré-remplies relatives à votre compte **Trade Republic** :
+    Tout compte ouvert à l'étranger doit obligatoirement être déclaré chaque année en même temps que vos revenus via le formulaire 3916. 
+    Voici les informations pré-remplies relatives à votre compte Trade Republic :
     """)
     
-    with st.expander("🔍 Afficher les détails à recopier pour le formulaire 3916"):
-        # Attempt to find the German IBAN from the counterparty fields or general description
-        iban_sample = "DE..."
-        for idx, row in df.iterrows():
-            desc = str(row.get("description", ""))
-            c_iban = str(row.get("counterparty_name/iban", ""))
-            if "DE" in desc or "DE" in c_iban:
-                # Extract some hints if available
-                iban_sample = "Compte Allemand (DE) lié à votre profil"
-                break
-                
+    with st.expander("Afficher les détails à recopier pour le formulaire 3916"):
         st.markdown(f"""
         | Champ sur le formulaire 3916 | Valeur à saisir |
         | :--- | :--- |
@@ -608,4 +599,4 @@ with main_tab3:
         | **Numéro de compte / IBAN** | *Vérifiez sur votre application TR (commence par DE)* |
         """)
         
-        st.info("⚠️ **Attention** : L'amende en cas de non-déclaration d'un compte à l'étranger est de 1 500 € par an et par compte. N'oubliez pas de cocher la case **8UU** sur votre déclaration principale 2042 pour signaler que vous joignez l'annexe 3916.")
+        st.info("Attention : L'amende en cas de non-déclaration d'un compte à l'étranger est de 1 500 € par an et par compte. N'oubliez pas de cocher la case **8UU** sur votre déclaration principale 2042.")
