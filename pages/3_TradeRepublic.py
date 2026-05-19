@@ -326,7 +326,7 @@ main_tab1, main_tab2, main_tab3 = st.tabs(["Investissements", "Depenses & Budget
 # TAB 1 — MES INVESTISSEMENTS
 # ════════════════════════════════════════════════════════════════
 with main_tab1:
-    tab_inv1, tab_inv2, tab_inv3 = st.tabs(["Evolution", "Repartition", "Detail par ETF"])
+    tab_inv1, tab_inv2, tab_inv3, tab_inv4 = st.tabs(["Evolution", "Repartition", "Detail par ETF", "Gains (Saveback & Intérêts)"])
 
     with tab_inv1:
         st.subheader("Evolution de votre portefeuille & patrimoine")
@@ -618,8 +618,21 @@ with main_tab1:
         else:
             st.info("Aucun actif à afficher.")
             
+    with tab_inv4:
+        st.subheader("Gains Passifs (Saveback & Intérêts)")
+        st.markdown("""
+        Retrouvez ici le détail des gains cumulés hors valorisation de votre portefeuille d'actifs.
+        Ces gains proviennent du **Saveback** (cashback de 1% sur vos dépenses carte) et des **Intérêts rémunérés**
+        versés par Trade Republic sur votre solde d'espèces.
+        """)
+        
+        sg1, sg2, sg3 = st.columns(3)
+        sg1.metric("Cumul Saveback", fmt(total_saveback), "Cashback 1%")
+        sg2.metric("Cumul Intérêts", fmt(total_interest), "Rémunération espèces")
+        sg3.metric("Total Gains Passifs", fmt(total_saveback + total_interest), "Hors dividendes & PV")
+        
         st.markdown("---")
-        st.subheader("Saveback & Interets")
+        
         c1, c2 = st.columns(2)
         with c1:
             sav_monthly = savings.groupby("month")["amount"].sum().reset_index()
@@ -628,7 +641,7 @@ with main_tab1:
                 hovertemplate="<b>%{x}</b><br>" + ("••••" if hide_amounts else "%{y:.2f} €") + "<extra></extra>"))
             fig_sav.update_layout(title="Saveback mensuel (€)", template="plotly_dark",
                 plot_bgcolor="rgba(15,23,42,0.5)", paper_bgcolor="rgba(0,0,0,0)",
-                font=dict(color="#e2e8f0"), height=280,
+                font=dict(color="#e2e8f0"), height=300,
                 xaxis=dict(tickangle=45), yaxis=dict(showticklabels=not hide_amounts), margin=dict(l=0,r=0,t=40,b=60))
             st.plotly_chart(fig_sav, width="stretch")
         with c2:
@@ -638,7 +651,7 @@ with main_tab1:
                 hovertemplate="<b>%{x}</b><br>" + ("••••" if hide_amounts else "%{y:.2f} €") + "<extra></extra>"))
             fig_int.update_layout(title="Intérêts mensuels (€)", template="plotly_dark",
                 plot_bgcolor="rgba(15,23,42,0.5)", paper_bgcolor="rgba(0,0,0,0)",
-                font=dict(color="#e2e8f0"), height=280,
+                font=dict(color="#e2e8f0"), height=300,
                 xaxis=dict(tickangle=45), yaxis=dict(showticklabels=not hide_amounts), margin=dict(l=0,r=0,t=40,b=60))
             st.plotly_chart(fig_int, width="stretch")
 
