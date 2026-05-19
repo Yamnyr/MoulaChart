@@ -4,8 +4,8 @@ import plotly.graph_objects as go
 import plotly.express as px
 from datetime import datetime
 import os
+import requests
 import yfinance as yf
-from yahooquery import search as yq_search
 
 # ── MCC categories (Clean plain text) ───────────────────────────
 MCC_CATEGORIES = {
@@ -19,12 +19,12 @@ MCC_CATEGORIES = {
     "7399": "Services", "9405": "Impots/Admin", "5462": "Boulangerie",
 }
 
-# ── ISIN-to-Ticker Map (Yahoo Finance EUR-denominated tickers) ─
-ISIN_TICKERS = {
-    "IE00B5BMR087": "SXR8.DE",    # S&P 500 Acc
-    "IE0002XZSHO1": "WPEA.PA",    # MSCI World Swap PEA Acc
-    "FR0011871110": "PANX.PA",    # PEA Nasdaq 100 Acc
-    "FR0010342592": "LQQ.PA",     # PEA Nasdaq 100 2x Lev Acc
+# Foolproof fallback mapping for known Trade Republic ISINs to Yahoo Finance symbols
+FALLBACK_TICKERS = {
+    "IE00B5BMR087": "CSSPX.MI", # S&P 500 (Milan, EUR)
+    "IE0002XZSHO1": "WPEA.PA",   # MSCI World PEA (Paris, EUR)
+    "FR0011871110": "PUST.PA",   # Nasdaq 100 PEA (Paris, EUR)
+    "FR0010342592": "0W9J.IL",   # Nasdaq 2x Lev (London, EUR)
 }
 
 # ── Load data ────────────────────────────────────────────────────
@@ -60,35 +60,89 @@ def load_csv(file) -> pd.DataFrame:
     df["month"] = df["date"].dt.to_period("M").astype(str)
     return df
 
-# ── Fetch live Yahoo prices ──────────────────────────────────────
-@st.cache_data(ttl=1800)
-def fetch_current_prices(isin_list):
-    prices = {}
-    for isin in isin_list:
-        ticker = ISIN_TICKERS.get(isin)
-        if not ticker:
-            try:
-                res = yq_search(isin)
-                if res and 'quotes' in res and len(res['quotes']) > 0:
-                    ticker = res['quotes'][0]['symbol']
-            except:
-                pass
-        if not ticker:
-            ticker = isin
-        
+# ── Yahoo Finance Data Downloader ────────────────────────────────
+@st.cache_data(ttl="6h")
+def fetch_live_prices_and_history(isins):
+    """
+    Maps ISINs to Yahoo Finance tickers, downloads current price and history.
+    """
+    tickers = {}
+    headers = {"User-Agent": "Mozilla/5.0"}
+    
+    for isin in isins:
+        if not isin or pd.isna(isin):
+            continue
+        # Check fallback first
+        if isin in FALLBACK_TICKERS:
+            tickers[isin] = FALLBACK_TICKERS[isin]
+            continue
+            
+        # Search Yahoo Finance
+        url = f"https://query2.finance.yahoo.com/v1/finance/search?q={isin}"
         try:
-            df_hist = yf.download(ticker, period="5d", interval="1d", auto_adjust=True, progress=False)
-            if not df_hist.empty:
-                if isinstance(df_hist.columns, pd.MultiIndex):
-                    df_hist.columns = df_hist.columns.get_level_values(0)
-                prices[isin] = float(df_hist["Close"].dropna().iloc[-1])
-        except:
+            r = requests.get(url, headers=headers, timeout=8).json()
+            quotes = r.get("quotes", [])
+            if quotes:
+                tickers[isin] = quotes[0]["symbol"]
+        except Exception:
             pass
-    return prices
+            
+    # Download Forex for USD conversion if needed
+    try:
+        forex = yf.download("EURUSD=X", period="1y", interval="1d")
+        if isinstance(forex.columns, pd.MultiIndex):
+            forex.columns = [col[0] for col in forex.columns]
+        eurusd_series = forex["Close"].ffill()
+    except Exception:
+        eurusd_series = None
+
+    live_prices = {}
+    hist_prices = {}
+
+    for isin, ticker in tickers.items():
+        try:
+            t = yf.Ticker(ticker)
+            
+            # 1. Live price
+            live_price = None
+            try:
+                live_price = t.fast_info.get("lastPrice")
+            except Exception:
+                pass
+            if live_price is None:
+                h = t.history(period="1d")
+                if not h.empty:
+                    live_price = h["Close"].iloc[-1]
+            
+            # 2. History
+            hist = t.history(period="max")
+            if isinstance(hist.columns, pd.MultiIndex):
+                hist.columns = [col[0] for col in hist.columns]
+                
+            # Currency conversion to EUR
+            currency = t.info.get("currency", "EUR")
+            if currency == "USD" and eurusd_series is not None:
+                hist["Close"] = hist["Close"] / eurusd_series
+                if live_price is not None:
+                    rate = eurusd_series.iloc[-1]
+                    if isinstance(rate, pd.Series):
+                        rate = rate.iloc[-1]
+                    live_price = live_price / rate
+            
+            if live_price is not None:
+                live_prices[isin] = float(live_price)
+            if not hist.empty:
+                hist.index = hist.index.tz_localize(None).normalize()
+                hist_prices[isin] = hist["Close"]
+        except Exception:
+            pass
+            
+    # Apply backup static calculations for missing entries
+    return live_prices, hist_prices
 
 # ── Sidebar ──────────────────────────────────────────────────────
 with st.sidebar:
-    st.title("🏦 Trade Republic")
+    st.title("Trade Republic")
     st.markdown("---")
     
     # Toggle to hide amounts
@@ -111,6 +165,15 @@ def fmt(val, is_curr=True, decimals=2):
     if is_curr:
         return f"{val:,.{decimals}f} €"
     return f"{val:,.{decimals}f}"
+
+def mask_df(df_to_mask, columns_to_mask, is_curr=True):
+    if hide_amounts:
+        copy_df = df_to_mask.copy()
+        for col in columns_to_mask:
+            if col in copy_df.columns:
+                copy_df[col] = "•••• €" if is_curr else "••••"
+        return copy_df
+    return df_to_mask
 
 # ── Load ─────────────────────────────────────────────────────────
 try:
@@ -142,37 +205,64 @@ inflows = df[df["type"].isin(["CUSTOMER_INBOUND", "TRANSFER_INSTANT_INBOUND"])]
 savings = df[df["type"] == "BENEFITS_SAVEBACK"]
 interests = df[df["type"] == "INTEREST_PAYMENT"]
 
-# ── Plus-Values calculations using yfinance ──────────────────────
+# ── Fetch Yahoo Finance Live & Historical Prices ────────────────
 unique_isins = buys["symbol"].dropna().unique().tolist()
-live_prices = fetch_current_prices(unique_isins)
+live_prices, hist_prices = fetch_live_prices_and_history(unique_isins)
 
-# Aggregation by ISIN and ETF Name
-etf_detail = buys.groupby(["symbol", "etf_name", "account_type"]).agg(
-    Achats=("amount", "count"),
-    Investi=("amount", lambda x: x.abs().sum()),
-    Parts=("shares", "sum")
-).reset_index()
+# ════════════════════════════════════════════════════════════════
+# PORTFOLIO MATH & REAL-TIME CAPITAL GAINS (PLUS-VALUES)
+# ════════════════════════════════════════════════════════════════
+etf_positions = []
+for (etf_name, isin, acct), sub in buys.groupby(["etf_name", "symbol", "account_type"]):
+    shares = sub["shares"].sum()
+    invested = sub["amount"].abs().sum()
+    
+    if shares <= 0:
+        continue
+        
+    pru = invested / shares
+    live_price = live_prices.get(isin, pru) # fallback to pru if fetch failed
+    current_value = shares * live_price
+    plus_value = current_value - invested
+    plus_value_pct = (plus_value / invested * 100) if invested > 0 else 0.0
+    
+    etf_positions.append({
+        "ETF": etf_name,
+        "ISIN": isin,
+        "Compte": acct,
+        "Achats": len(sub),
+        "Investi": invested,
+        "Parts": shares,
+        "PRU": pru,
+        "Cours": live_price,
+        "Valeur Actuelle": current_value,
+        "Plus-value €": plus_value,
+        "Plus-value %": plus_value_pct
+    })
 
-# Map live prices
-etf_detail["Cours actuel (€)"] = etf_detail["symbol"].map(live_prices)
-# Fallback if Yahoo Finance fails
-etf_detail["Cours actuel (€)"] = etf_detail["Cours actuel (€)"].fillna(etf_detail["Investi"] / etf_detail["Parts"])
+df_positions = pd.DataFrame(etf_positions)
 
-# Math calculations
-etf_detail["Prix moy./part (€)"] = etf_detail["Investi"] / etf_detail["Parts"].replace(0, float("nan"))
-etf_detail["Valeur actuelle (€)"] = etf_detail["Parts"] * etf_detail["Cours actuel (€)"]
-etf_detail["Plus-value (€)"] = etf_detail["Valeur actuelle (€)"] - etf_detail["Investi"]
-etf_detail["Plus-value (%)"] = (etf_detail["Plus-value (€)"] / etf_detail["Investi"] * 100).fillna(0.0)
-
-# Total calculations
-total_invested = etf_detail["Investi"].sum()
-total_current_value = etf_detail["Valeur actuelle (€)"].sum()
-total_plus_value = total_current_value - total_invested
-plus_value_percent = (total_plus_value / total_invested * 100) if total_invested > 0 else 0.0
-
+# Totals for KPIs
+total_invested = buys["amount"].abs().sum()
+total_deposited = inflows["amount"].sum()
 total_saveback = savings["amount"].sum()
 total_interest = interests["amount"].sum()
 total_spent = cards["amount"].abs().sum()
+
+# Current Cash Account Balance = Cumulative sum of all cash amounts in filtered records
+# We calculate the remaining cash in the selected account(s)
+total_cash_balance = df["amount"].sum()
+
+if not df_positions.empty:
+    total_current_value = df_positions["Valeur Actuelle"].sum()
+    total_plus_value = total_current_value - total_invested
+    plus_value_percent = (total_plus_value / total_invested * 100) if total_invested > 0 else 0.0
+else:
+    total_current_value = total_invested
+    total_plus_value = 0.0
+    plus_value_percent = 0.0
+
+total_patrimoine = total_current_value + total_cash_balance
 
 # ════════════════════════════════════════════════════════════════
 # HEADER
@@ -199,26 +289,20 @@ st.markdown(f"*{len(df)} transactions · {df['date'].min().strftime('%d/%m/%Y')}
 st.markdown("---")
 
 # ════════════════════════════════════════════════════════════════
-# KPIs (with Plus-Values!)
+# KPIs
 # ════════════════════════════════════════════════════════════════
 c1, c2, c3, c4, c5 = st.columns(5)
-def kpi(col, label, value, delta=None, pos=True):
-    dclass = "metric-delta-pos" if pos else "metric-delta-neg"
-    delta_html = f'<div class="{dclass}">{delta}</div>' if delta else ""
-    col.markdown(f"""<div class="metric-card">
-    <div class="metric-label">{label}</div>
-    <div class="metric-value">{value}</div>{delta_html}</div>""", unsafe_allow_html=True)
 
 kpi(c1, "Total investi", fmt(total_invested, decimals=0))
-kpi(c2, "Valeur actuelle", fmt(total_current_value, decimals=0))
+kpi(c2, "Valeur Portefeuille", fmt(total_current_value, decimals=0))
 
-# Plus-value globale Delta
-pv_label = fmt(total_plus_value)
-pv_pct_label = f"{plus_value_percent:+.2f}%" if not hide_amounts else ""
-kpi(c3, "Plus-value globale", pv_label, f"{pv_pct_label}" if not hide_amounts else "", pos=(total_plus_value >= 0))
+# Plus-value metric
+pv_pos = total_plus_value >= 0
+pv_delta_label = f"{total_plus_value:+.2f} € ({plus_value_percent:+.2f}%)" if not hide_amounts else ""
+kpi(c3, "Plus-value globale", fmt(total_plus_value), pv_delta_label, pos=pv_pos)
 
-kpi(c4, "Gains (Int. & Sav.)", fmt(total_interest + total_saveback), f"Interets: {fmt(total_interest)}")
-kpi(c5, "Depenses carte", fmt(total_spent, decimals=0), f"{len(cards)} transactions", False)
+kpi(c4, "Solde Especes (Remunere)", fmt(total_cash_balance))
+kpi(c5, "Total Patrimoine (Cash+ETF)", fmt(total_patrimoine, decimals=0), f"Plus-values incluses")
 
 # Main Navigation Tabs
 main_tab1, main_tab2, main_tab3 = st.tabs(["Investissements", "Depenses & Budget", "Simulateur IFU"])
@@ -230,42 +314,176 @@ with main_tab1:
     tab_inv1, tab_inv2, tab_inv3 = st.tabs(["Evolution", "Repartition", "Detail par ETF"])
 
     with tab_inv1:
-        col_l, col_r = st.columns([2, 1])
-        with col_l:
-            # Cumulative investment per ETF over time
-            buys_sorted = buys.sort_values("date")
-            cum_data = []
-            for etf in buys_sorted["etf_name"].unique():
-                sub = buys_sorted[buys_sorted["etf_name"] == etf].copy()
-                sub["cum_invested"] = sub["amount"].abs().cumsum()
-                sub["etf"] = etf
-                cum_data.append(sub[["date", "cum_invested", "etf"]])
+        st.subheader("Evolution de votre portefeuille & patrimoine")
+        
+        # Mode selector
+        evol_mode = st.radio(
+            "Type de graphique :",
+            ["Patrimoine Global (Evolution temporelle)", "Capital cumulé par ETF", "Investissement mensuel"],
+            horizontal=True
+        )
 
-            if cum_data:
-                df_cum = pd.concat(cum_data)
-                fig = go.Figure()
-                for etf in df_cum["etf"].unique():
-                    s = df_cum[df_cum["etf"] == etf]
-                    color = etf_colors.get(etf, "#64748b")
-                    fig.add_trace(go.Scatter(
-                        x=s["date"], y=s["cum_invested"], name=etf, mode="lines",
-                        line=dict(color=color, width=2.5),
-                        hovertemplate=f"<b>{etf}</b><br>%{{x|%d/%m/%Y}}<br>" + ("•••• €" if hide_amounts else "%{y:,.0f} €") + "<extra></extra>"
+        if "Patrimoine Global" in evol_mode:
+            # ── 1. Calculate Daily Patrimonio Evolution ────────────────
+            if buys.empty:
+                st.info("Aucun achat d'ETF trouve.")
+            else:
+                with st.spinner("Generation de l'historique de votre patrimoine..."):
+                    # Calculate date range
+                    df_sorted = df.sort_values("date")
+                    min_date = df_sorted["date"].min().normalize()
+                    today = pd.Timestamp.now().normalize()
+                    date_range = pd.date_range(start=min_date, end=today, freq="D")
+                    
+                    # Daily transactions cash sum
+                    df_sorted["date_day"] = df_sorted["date"].dt.normalize()
+                    daily_cash_changes = df_sorted.groupby("date_day")["amount"].sum()
+                    
+                    # Daily shares sum per ISIN
+                    daily_shares_changes = {}
+                    for isin in unique_isins:
+                        sub = df_sorted[df_sorted["symbol"] == isin]
+                        daily_shares_changes[isin] = sub.groupby("date_day")["shares"].sum()
+                        
+                    # Daily invested capital changes (cumulative sum of absoluteBUY amounts)
+                    daily_buys_amount = df_sorted[df_sorted["type"] == "BUY"].groupby("date_day")["amount"].apply(lambda x: x.abs().sum())
+                    
+                    # Loop over range to accumulate
+                    cash_balance_series = []
+                    portfolio_value_series = []
+                    invested_capital_series = []
+                    
+                    curr_cash = 0.0
+                    curr_shares = {isin: 0.0 for isin in unique_isins}
+                    curr_invested = 0.0
+                    
+                    for d in date_range:
+                        if d in daily_cash_changes.index:
+                            curr_cash += daily_cash_changes.loc[d]
+                        for isin in unique_isins:
+                            if isin in daily_shares_changes and d in daily_shares_changes[isin].index:
+                                curr_shares[isin] += daily_shares_changes[isin].loc[d]
+                        if d in daily_buys_amount.index:
+                            curr_invested += daily_buys_amount.loc[d]
+                            
+                        # Compute portfolio value for this date
+                        port_val = 0.0
+                        for isin in unique_isins:
+                            sh = curr_shares[isin]
+                            if sh > 0:
+                                price = 0.0
+                                if isin in hist_prices:
+                                    ser = hist_prices[isin]
+                                    sub_ser = ser[:d]
+                                    if not sub_ser.empty:
+                                        price = sub_ser.iloc[-1]
+                                if price == 0:
+                                    # fallback to average buying price up to this date
+                                    sub_buys = df_sorted[(df_sorted["symbol"] == isin) & (df_sorted["date_day"] <= d) & (df_sorted["price"] > 0)]
+                                    if not sub_buys.empty:
+                                        price = sub_buys["price"].mean()
+                                port_val += sh * price
+                                
+                        cash_balance_series.append(curr_cash)
+                        portfolio_value_series.append(port_val)
+                        invested_capital_series.append(curr_invested)
+                        
+                    df_patrimoine = pd.DataFrame({
+                        "Date": date_range,
+                        "Solde Especes": cash_balance_series,
+                        "Portefeuille": portfolio_value_series,
+                        "Total Investi": invested_capital_series,
+                        "Patrimoine Total": [c + p for c, p in zip(cash_balance_series, portfolio_value_series)]
+                    })
+                    
+                    # Plot Patrimonio Evolution
+                    fig_pat = go.Figure()
+                    fig_pat.add_trace(go.Scatter(
+                        x=df_patrimoine["Date"], y=df_patrimoine["Patrimoine Total"], name="Patrimoine Total (Cash + ETF)",
+                        line=dict(color="#10b981", width=3),
+                        hovertemplate="<b>Patrimoine Total</b><br>%{x|%d/%m/%Y}<br>" + ("••••" if hide_amounts else "%{y:,.2f} €") + "<extra></extra>"
                     ))
-                fig.update_layout(
-                    title="Capital cumulé investi par ETF",
-                    template="plotly_dark", hovermode="x unified",
-                    plot_bgcolor="rgba(15,23,42,0.5)", paper_bgcolor="rgba(0,0,0,0)",
-                    font=dict(color="#e2e8f0"), height=400,
-                    legend=dict(orientation="h", y=1.08, x=0),
-                    xaxis=dict(showgrid=True, gridcolor="rgba(102,126,234,0.1)"),
-                    yaxis=dict(showgrid=True, gridcolor="rgba(102,126,234,0.1)", title="€ investi", showticklabels=not hide_amounts),
-                    margin=dict(l=0, r=0, t=50, b=0)
-                )
-                st.plotly_chart(fig, use_container_width=True)
+                    fig_pat.add_trace(go.Scatter(
+                        x=df_patrimoine["Date"], y=df_patrimoine["Portefeuille"], name="Valeur Portefeuille ETF",
+                        line=dict(color="#3b82f6", width=2),
+                        hovertemplate="<b>Portefeuille</b><br>%{x|%d/%m/%Y}<br>" + ("••••" if hide_amounts else "%{y:,.2f} €") + "<extra></extra>"
+                    ))
+                    fig_pat.add_trace(go.Scatter(
+                        x=df_patrimoine["Date"], y=df_patrimoine["Total Investi"], name="Total Investi (Capital)",
+                        line=dict(color="#f59e0b", width=1.5, dash="dash"),
+                        hovertemplate="<b>Total Investi</b><br>%{x|%d/%m/%Y}<br>" + ("••••" if hide_amounts else "%{y:,.2f} €") + "<extra></extra>"
+                    ))
+                    fig_pat.add_trace(go.Scatter(
+                        x=df_patrimoine["Date"], y=df_patrimoine["Solde Especes"], name="Solde Espèces",
+                        line=dict(color="#64748b", width=1.5),
+                        hovertemplate="<b>Solde Espèces</b><br>%{x|%d/%m/%Y}<br>" + ("••••" if hide_amounts else "%{y:,.2f} €") + "<extra></extra>"
+                    ))
+                    
+                    fig_pat.update_layout(
+                        title="Evolution temporelle du Patrimoine Global et Portefeuille",
+                        template="plotly_dark", hovermode="x unified",
+                        plot_bgcolor="rgba(15,23,42,0.5)", paper_bgcolor="rgba(0,0,0,0)",
+                        font=dict(color="#e2e8f0"), height=450,
+                        legend=dict(orientation="h", y=1.08, x=0),
+                        xaxis=dict(showgrid=True, gridcolor="rgba(102,126,234,0.1)"),
+                        yaxis=dict(showgrid=True, gridcolor="rgba(102,126,234,0.1)", title="Euro (EUR)", showticklabels=not hide_amounts),
+                        margin=dict(l=0, r=0, t=50, b=0)
+                    )
+                    st.plotly_chart(fig_pat, use_container_width=True)
 
-        with col_r:
-            # Monthly investment bar
+        elif "Capital cumulé par ETF" in evol_mode:
+            col_l, col_r = st.columns([2, 1])
+            with col_l:
+                buys_sorted = buys.sort_values("date")
+                cum_data = []
+                for etf in buys_sorted["etf_name"].unique():
+                    sub = buys_sorted[buys_sorted["etf_name"] == etf].copy()
+                    sub["cum_invested"] = sub["amount"].abs().cumsum()
+                    sub["etf"] = etf
+                    cum_data.append(sub[["date", "cum_invested", "etf"]])
+
+                if cum_data:
+                    df_cum = pd.concat(cum_data)
+                    fig = go.Figure()
+                    for etf in df_cum["etf"].unique():
+                        s = df_cum[df_cum["etf"] == etf]
+                        color = etf_colors.get(etf, "#64748b")
+                        fig.add_trace(go.Scatter(
+                            x=s["date"], y=s["cum_invested"], name=etf, mode="lines",
+                            line=dict(color=color, width=2.5),
+                            hovertemplate=f"<b>{etf}</b><br>%{{x|%d/%m/%Y}}<br>" + ("•••• €" if hide_amounts else "%{y:,.0f} €") + "<extra></extra>"
+                        ))
+                    fig.update_layout(
+                        title="Capital cumulé investi par ETF",
+                        template="plotly_dark", hovermode="x unified",
+                        plot_bgcolor="rgba(15,23,42,0.5)", paper_bgcolor="rgba(0,0,0,0)",
+                        font=dict(color="#e2e8f0"), height=400,
+                        legend=dict(orientation="h", y=1.08, x=0),
+                        xaxis=dict(showgrid=True, gridcolor="rgba(102,126,234,0.1)"),
+                        yaxis=dict(showgrid=True, gridcolor="rgba(102,126,234,0.1)", title="€ investi", showticklabels=not hide_amounts),
+                        margin=dict(l=0, r=0, t=50, b=0)
+                    )
+                    st.plotly_chart(fig, use_container_width=True)
+
+            with col_r:
+                monthly_buys = buys.groupby("month")["amount"].apply(lambda x: x.abs().sum()).reset_index()
+                monthly_buys.columns = ["month", "montant"]
+                fig2 = go.Figure(go.Bar(
+                    x=monthly_buys["month"], y=monthly_buys["montant"],
+                    marker_color="#10b981",
+                    hovertemplate="<b>%{x}</b><br>" + ("•••• €" if hide_amounts else "%{y:,.0f} €") + "<extra></extra>"
+                ))
+                fig2.update_layout(
+                    title="Investissement mensuel",
+                    template="plotly_dark", plot_bgcolor="rgba(15,23,42,0.5)",
+                    paper_bgcolor="rgba(0,0,0,0)", font=dict(color="#e2e8f0"),
+                    height=400, xaxis=dict(showgrid=False, tickangle=45),
+                    yaxis=dict(showgrid=True, gridcolor="rgba(102,126,234,0.1)", title="€", showticklabels=not hide_amounts),
+                    margin=dict(l=0, r=0, t=50, b=60)
+                )
+                st.plotly_chart(fig2, use_container_width=True)
+
+        else:
             monthly_buys = buys.groupby("month")["amount"].apply(lambda x: x.abs().sum()).reset_index()
             monthly_buys.columns = ["month", "montant"]
             fig2 = go.Figure(go.Bar(
@@ -285,107 +503,102 @@ with main_tab1:
 
     with tab_inv2:
         col_a, col_b = st.columns(2)
-        etf_totals = buys.groupby("etf_name")["amount"].apply(lambda x: x.abs().sum()).reset_index()
-        etf_totals.columns = ["ETF", "Montant"]
-
+        
         with col_a:
-            colors_pie = [etf_colors.get(e, "#64748b") for e in etf_totals["ETF"]]
-            fig_pie = go.Figure(go.Pie(
-                labels=etf_totals["ETF"], values=etf_totals["Montant"],
-                hole=0.55, marker=dict(colors=colors_pie),
-                textinfo="label+percent" if not hide_amounts else "label",
-                hovertemplate="<b>%{label}</b><br>" + ("•••• €" if hide_amounts else "%{value:,.0f} €<br>%{percent}") + "<extra></extra>"
-            ))
-            fig_pie.update_layout(
-                title="Répartition du capital investi", template="plotly_dark",
-                paper_bgcolor="rgba(0,0,0,0)", font=dict(color="#e2e8f0"),
-                height=380, showlegend=False,
-                annotations=[dict(text=fmt(total_invested, decimals=0), x=0.5, y=0.5,
-                                  font=dict(size=18, color="white"), showarrow=False)]
-            )
-            st.plotly_chart(fig_pie, use_container_width=True)
+            # Pie Chart using Current Market Value (Valeur Actuelle) instead of invested capital!
+            if df_positions.empty:
+                st.info("Aucune position d'ETF active.")
+            else:
+                colors_pie = [etf_colors.get(e, "#64748b") for e in df_positions["ETF"]]
+                fig_pie = go.Figure(go.Pie(
+                    labels=df_positions["ETF"], values=df_positions["Valeur Actuelle"],
+                    hole=0.55, marker=dict(colors=colors_pie),
+                    textinfo="label+percent" if not hide_amounts else "label",
+                    hovertemplate="<b>%{label}</b><br>" + ("••••" if hide_amounts else "%{value:,.2f} €<br>%{percent}") + "<extra></extra>"
+                ))
+                fig_pie.update_layout(
+                    title="Répartition par Valeur Actuelle du Portefeuille", template="plotly_dark",
+                    paper_bgcolor="rgba(0,0,0,0)", font=dict(color="#e2e8f0"),
+                    height=380, showlegend=False,
+                    annotations=[dict(text=fmt(total_current_value, decimals=0), x=0.5, y=0.5,
+                                      font=dict(size=18, color="white"), showarrow=False)]
+                )
+                st.plotly_chart(fig_pie, use_container_width=True)
 
         with col_b:
-            # Dynamic CTO vs PEA bar chart
-            etf_account = buys.groupby(["etf_name", "account_type"])["amount"].apply(
-                lambda x: x.abs().sum()).reset_index()
-            etf_account.columns = ["ETF", "Compte", "Investi"]
-            fig_cto_pea = go.Figure()
-            for compte in etf_account["Compte"].unique():
-                sub = etf_account[etf_account["Compte"] == compte]
-                fig_cto_pea.add_trace(go.Bar(
-                    x=sub["ETF"], y=sub["Investi"], name=compte,
-                    marker_color=ACCOUNT_COLORS.get(compte, "#64748b"),
-                    text=sub["Investi"].apply(lambda v: fmt(v, decimals=0)) if not hide_amounts else None,
-                    textposition="auto",
-                    hovertemplate="<b>%{x}</b> (" + compte + ")<br>" + ("•••• €" if hide_amounts else "%{y:,.0f} €") + "<extra></extra>"
-                ))
-            fig_cto_pea.update_layout(
-                title="Capital investi par ETF — CTO vs PEA", template="plotly_dark",
-                plot_bgcolor="rgba(15,23,42,0.5)", paper_bgcolor="rgba(0,0,0,0)",
-                font=dict(color="#e2e8f0"), height=380, barmode="group",
-                legend=dict(orientation="h", y=1.08),
-                yaxis=dict(showgrid=True, gridcolor="rgba(102,126,234,0.1)", title="€ investi", showticklabels=not hide_amounts),
-                margin=dict(l=0, r=0, t=60, b=0)
-            )
-            st.plotly_chart(fig_cto_pea, use_container_width=True)
+            if not df_positions.empty:
+                # CTO vs PEA comparison chart based on Valeur Actuelle
+                acct_group = df_positions.groupby(["ETF", "Compte"])["Valeur Actuelle"].sum().reset_index()
+                fig_cto_pea = go.Figure()
+                for compte in acct_group["Compte"].unique():
+                    sub = acct_group[acct_group["Compte"] == compte]
+                    fig_cto_pea.add_trace(go.Bar(
+                        x=sub["ETF"], y=sub["Valeur Actuelle"], name=compte,
+                        marker_color=ACCOUNT_COLORS.get(compte, "#64748b"),
+                        text=sub["Valeur Actuelle"].apply(lambda v: fmt(v, decimals=0)) if not hide_amounts else None,
+                        textposition="auto",
+                        hovertemplate="<b>%{x}</b> (" + compte + ")<br>" + ("••••" if hide_amounts else "%{y:,.2f} €") + "<extra></extra>"
+                    ))
+                fig_cto_pea.update_layout(
+                    title="Valeur Actuelle par ETF — CTO vs PEA", template="plotly_dark",
+                    plot_bgcolor="rgba(15,23,42,0.5)", paper_bgcolor="rgba(0,0,0,0)",
+                    font=dict(color="#e2e8f0"), height=380, barmode="group",
+                    legend=dict(orientation="h", y=1.08),
+                    yaxis=dict(showgrid=True, gridcolor="rgba(102,126,234,0.1)", title="€ actuel", showticklabels=not hide_amounts),
+                    margin=dict(l=0, r=0, t=60, b=0)
+                )
+                st.plotly_chart(fig_cto_pea, use_container_width=True)
 
     with tab_inv3:
-        # Totaux CTO vs PEA
-        cto_total = etf_detail[etf_detail["account_type"] == "CTO"]["Investi"].sum()
-        cto_current = etf_detail[etf_detail["account_type"] == "CTO"]["Valeur actuelle (€)"].sum()
-        cto_pv = cto_current - cto_total
-        cto_pv_pct = (cto_pv / cto_total * 100) if cto_total > 0 else 0.0
+        # Totals CTO vs PEA Val Actuelle & Plus-values
+        if not df_positions.empty:
+            cto_total = df_positions[df_positions["Compte"] == "CTO"]["Investi"].sum()
+            cto_current = df_positions[df_positions["Compte"] == "CTO"]["Valeur Actuelle"].sum()
+            cto_pv = cto_current - cto_total
+            cto_pv_pct = (cto_pv / cto_total * 100) if cto_total > 0 else 0.0
 
-        pea_total = etf_detail[etf_detail["account_type"] == "PEA"]["Investi"].sum()
-        pea_current = etf_detail[etf_detail["account_type"] == "PEA"]["Valeur actuelle (€)"].sum()
-        pea_pv = pea_current - pea_total
-        pea_pv_pct = (pea_pv / pea_total * 100) if pea_total > 0 else 0.0
+            pea_total = df_positions[df_positions["Compte"] == "PEA"]["Investi"].sum()
+            pea_current = df_positions[df_positions["Compte"] == "PEA"]["Valeur Actuelle"].sum()
+            pea_pv = pea_current - pea_total
+            pea_pv_pct = (pea_pv / pea_total * 100) if pea_total > 0 else 0.0
+        else:
+            cto_current, cto_pv, cto_pv_pct = 0.0, 0.0, 0.0
+            pea_current, pea_pv, pea_pv_pct = 0.0, 0.0, 0.0
 
-        grand_total = cto_total + pea_total
-        grand_current = cto_current + pea_current
-        
         mc1, mc2, mc3 = st.columns(3)
-        
-        # Display with dynamic PV
-        mc1.metric(
-            "CTO — Valeur Actuelle", 
-            fmt(cto_current, decimals=0),
-            f"Plus-value: {cto_pv:+.2f} € ({cto_pv_pct:+.2f}%)" if not hide_amounts else ""
-        )
-        mc2.metric(
-            "PEA — Valeur Actuelle", 
-            fmt(pea_current, decimals=0),
-            f"Plus-value: {pea_pv:+.2f} € ({pea_pv_pct:+.2f}%)" if not hide_amounts else ""
-        )
-        mc3.metric(
-            "Portefeuille Total", 
-            fmt(grand_current, decimals=0),
-            f"Plus-value: {total_plus_value:+.2f} € ({plus_value_percent:+.2f}%)" if not hide_amounts else ""
-        )
-        
+        mc1.metric("CTO — Valeur Actuelle", fmt(cto_current, decimals=0),
+                   f"Plus-value: {cto_pv:+.2f} € ({cto_pv_pct:+.2f}%)" if cto_current and not hide_amounts else "")
+        mc2.metric("PEA — Valeur Actuelle", fmt(pea_current, decimals=0),
+                   f"Plus-value: {pea_pv:+.2f} € ({pea_pv_pct:+.2f}%)" if pea_current and not hide_amounts else "")
+        mc3.metric("Portefeuille Global", fmt(total_current_value, decimals=0),
+                   f"Plus-value: {total_plus_value:+.2f} € ({plus_value_percent:+.2f}%)" if not hide_amounts else "")
         st.markdown("---")
         
         # Detail dataframe with live prices & plus-values
-        display_cols = ["etf_name", "account_type", "Achats", "Investi", "Parts", "Prix moy./part (€)", "Cours actuel (€)", "Valeur actuelle (€)", "Plus-value (€)", "Plus-value (%)"]
-        display_etf = etf_detail[display_cols].copy()
-        display_etf.columns = ["ETF", "Compte", "Achats", "Investi (€)", "Parts", "PRU (€)", "Cours actuel (€)", "Valeur actuelle (€)", "Plus-value (€)", "Plus-value (%)"]
-        
-        # Mask if requested
-        if hide_amounts:
-            for col in ["Investi (€)", "Parts", "PRU (€)", "Cours actuel (€)", "Valeur actuelle (€)", "Plus-value (€)", "Plus-value (%)"]:
-                display_etf[col] = "••••"
-            st.dataframe(display_etf, use_container_width=True, hide_index=True)
+        if not df_positions.empty:
+            display_cols = ["ETF", "Compte", "Achats", "Investi", "Parts", "PRU", "Cours", "Valeur Actuelle", "Plus-value €", "Plus-value %"]
+            display_etf = df_positions[display_cols].copy()
+            
+            # Formatting and headers
+            display_etf.columns = ["ETF", "Compte", "Nb achats", "Investi (€)", "Parts", "PRU (€)", "Cours (€)", "Valeur Actuelle (€)", "Plus-value (€)", "Plus-value (%)"]
+            
+            # Mask if requested
+            if hide_amounts:
+                for col in ["Investi (€)", "Parts", "PRU (€)", "Cours (€)", "Valeur Actuelle (€)", "Plus-value (€)", "Plus-value (%)"]:
+                    display_etf[col] = "••••"
+                st.dataframe(display_etf, use_container_width=True, hide_index=True)
+            else:
+                st.dataframe(
+                    display_etf.style.format({
+                        "Investi (€)": "{:,.2f}", "Parts": "{:.4f}",
+                        "PRU (€)": "{:.2f}", "Cours (€)": "{:.2f}",
+                        "Valeur Actuelle (€)": "{:,.2f}",
+                        "Plus-value (€)": "{:+.2f}", "Plus-value (%)": "{:+.2f}%"
+                    }).background_gradient(subset=["Plus-value (%)"], cmap="RdYlGn", align=0),
+                    use_container_width=True, hide_index=True
+                )
         else:
-            st.dataframe(
-                display_etf.style.format({
-                    "Investi (€)": "{:,.2f}", "Parts": "{:.4f}",
-                    "PRU (€)": "{:.2f}", "Cours actuel (€)": "{:.2f}",
-                    "Valeur actuelle (€)": "{:,.2f}",
-                    "Plus-value (€)": "{:+.2f}", "Plus-value (%)": "{:+.2f}%"
-                }).background_gradient(subset=["Plus-value (%)"], cmap="RdYlGn", align=0),
-                use_container_width=True, hide_index=True
-            )
+            st.info("Aucun actif à afficher.")
             
         st.markdown("---")
         st.subheader("Saveback & Interets")
