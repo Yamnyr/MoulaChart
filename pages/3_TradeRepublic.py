@@ -268,23 +268,6 @@ total_patrimoine = total_current_value + total_cash_balance
 # ════════════════════════════════════════════════════════════════
 # HEADER
 # ════════════════════════════════════════════════════════════════
-st.markdown("""
-<style>
-.metric-card{background:linear-gradient(135deg,#1a1b1e,#2d2d30);border:1px solid #3d3d40;
-border-radius:12px;padding:18px 22px;margin-bottom:8px;}
-.metric-label{font-size:12px;color:#94a3b8;font-weight:500;text-transform:uppercase;letter-spacing:.5px;}
-.metric-value{font-size:26px;font-weight:700;color:#f1f5f9;margin-top:4px;}
-.metric-delta-pos{font-size:13px;color:#10b981;margin-top:2px;}
-.metric-delta-neg{font-size:13px;color:#ef4444;margin-top:2px;}
-.section-title{font-size:22px;font-weight:700;color:#f1f5f9;margin:28px 0 16px;
-border-left:4px solid #10b981;padding-left:12px;}
-.tax-card{background:#111827;border:1px solid #374151;border-radius:10px;padding:15px;margin-bottom:15px;}
-.tax-box{background:#1f2937;border:1px dashed #4b5563;border-radius:6px;padding:8px 12px;margin:5px 0;}
-.tax-label{font-size:11px;color:#9ca3af;text-transform:uppercase;}
-.tax-value{font-size:16px;font-weight:bold;color:#f3f4f6;}
-</style>
-""", unsafe_allow_html=True)
-
 st.markdown("# Analyse Trade Republic")
 # Date string extraction robust to NaT/empty df
 if not df.empty and pd.notna(df['date'].min()) and pd.notna(df['date'].max()):
@@ -299,25 +282,19 @@ st.markdown("---")
 # ════════════════════════════════════════════════════════════════
 # KPIs
 # ════════════════════════════════════════════════════════════════
-def kpi(col, label, value, delta=None, pos=True):
-    dclass = "metric-delta-pos" if pos else "metric-delta-neg"
-    delta_html = f'<div class="{dclass}">{delta}</div>' if delta else ""
-    col.markdown(f"""<div class="metric-card">
-    <div class="metric-label">{label}</div>
-    <div class="metric-value">{value}</div>{delta_html}</div>""", unsafe_allow_html=True)
-
 c1, c2, c3, c4, c5 = st.columns(5)
 
-kpi(c1, "Total investi", fmt(total_invested, decimals=0))
-kpi(c2, "Valeur Portefeuille", fmt(total_current_value, decimals=0))
-
-# Plus-value metric
-pv_pos = total_plus_value >= 0
-pv_delta_label = f"{total_plus_value:+.2f} € ({plus_value_percent:+.2f}%)" if not hide_amounts else ""
-kpi(c3, "Plus-value globale", fmt(total_plus_value), pv_delta_label, pos=pv_pos)
-
-kpi(c4, "Solde Especes (Remunere)", fmt(total_cash_balance))
-kpi(c5, "Total Patrimoine (Cash+ETF)", fmt(total_patrimoine, decimals=0), f"Plus-values incluses")
+with c1:
+    st.metric("Total investi", fmt(total_invested, decimals=0))
+with c2:
+    st.metric("Valeur Portefeuille", fmt(total_current_value, decimals=0))
+with c3:
+    pv_delta_label = f"{total_plus_value:+.2f} € ({plus_value_percent:+.2f}%)" if not hide_amounts else ""
+    st.metric("Plus-value globale", fmt(total_plus_value), delta=pv_delta_label if pv_delta_label else None)
+with c4:
+    st.metric("Solde Especes (Remunere)", fmt(total_cash_balance))
+with c5:
+    st.metric("Total Patrimoine (Cash+ETF)", fmt(total_patrimoine, decimals=0), delta="Plus-values incluses", delta_color="off")
 
 # Main Navigation Tabs
 main_tab1, main_tab2, main_tab3 = st.tabs(["Investissements", "Depenses & Budget", "Simulateur IFU"])
@@ -334,7 +311,7 @@ with main_tab1:
         # Mode selector
         evol_mode = st.radio(
             "Type de graphique :",
-            ["Patrimoine Global (Evolution temporelle)", "Capital cumulé par ETF", "Investissement mensuel"],
+            ["Patrimoine Global (Evolution temporelle)", "Capital cumulé par ETF"],
             horizontal=True
         )
 
@@ -446,7 +423,7 @@ with main_tab1:
                     )
                     st.plotly_chart(fig_pat, width="stretch")
 
-        elif "Capital cumulé par ETF" in evol_mode:
+        else:
             col_l, col_r = st.columns([2, 1])
             with col_l:
                 buys_sorted = buys.sort_values("date")
@@ -497,24 +474,6 @@ with main_tab1:
                     margin=dict(l=0, r=0, t=50, b=60)
                 )
                 st.plotly_chart(fig2, width="stretch")
-
-        else:
-            monthly_buys = buys.groupby("month")["amount"].apply(lambda x: x.abs().sum()).reset_index()
-            monthly_buys.columns = ["month", "montant"]
-            fig2 = go.Figure(go.Bar(
-                x=monthly_buys["month"], y=monthly_buys["montant"],
-                marker_color="#10b981",
-                hovertemplate="<b>%{x}</b><br>" + ("•••• €" if hide_amounts else "%{y:,.0f} €") + "<extra></extra>"
-            ))
-            fig2.update_layout(
-                title="Investissement mensuel",
-                template="plotly_dark", plot_bgcolor="rgba(15,23,42,0.5)",
-                paper_bgcolor="rgba(0,0,0,0)", font=dict(color="#e2e8f0"),
-                height=400, xaxis=dict(showgrid=False, tickangle=45),
-                yaxis=dict(showgrid=True, gridcolor="rgba(102,126,234,0.1)", title="€", showticklabels=not hide_amounts),
-                margin=dict(l=0, r=0, t=50, b=60)
-            )
-            st.plotly_chart(fig2, width="stretch")
 
     with tab_inv2:
         col_a, col_b = st.columns(2)
@@ -861,44 +820,23 @@ with main_tab3:
             
             col_a, col_b = st.columns(2)
             with col_a:
-                st.markdown(f"""
-                <div class="tax-card">
-                    <h5>Formulaire 2042 — Déclaration Principale</h5>
-                    <p>Déclarez ces montants dans la section <i>Revenus des valeurs et capitaux mobiliers</i> :</p>
-                    <div class="tax-box">
-                        <div class="tax-label">Case <b>2TR</b> (Intérêts bruts soumis au barème ou flat tax)</div>
-                        <div class="tax-value">{fmt(gross_int)}</div>
-                    </div>
-                    <div class="tax-box">
-                        <div class="tax-label">Case <b>2CK</b> (Prélèvement forfaitaire non libératoire déjà versé)</div>
-                        <div class="tax-value">{fmt(tax_paid)}</div>
-                    </div>
-                </div>
-                """, unsafe_allow_html=True)
+                with st.container(border=True):
+                    st.subheader("Formulaire 2042 — Déclaration Principale")
+                    st.markdown("Déclarez ces montants dans la section *Revenus des valeurs et capitaux mobiliers* :")
+                    st.markdown("---")
+                    st.metric("Case 2TR (Intérêts bruts)", fmt(gross_int))
+                    st.metric("Case 2CK (Prélèvement versé)", fmt(tax_paid))
             
             with col_b:
-                st.markdown(f"""
-                <div class="tax-card" style="border-color: #3b82f6;">
-                    <h5 style="color: #3b82f6;">Synthèse des Gains Rémunérés</h5>
-                    <table style="width:100%; border-collapse: collapse; margin-top: 10px; font-size:13px;">
-                        <tr>
-                            <td style="padding: 5px 0; color: #9ca3af;">Intérêts Nets encaissés :</td>
-                            <td style="padding: 5px 0; text-align: right; font-weight: bold;">{fmt(net_int)}</td>
-                        </tr>
-                        <tr>
-                            <td style="padding: 5px 0; color: #9ca3af;">Prélèvement à la source (Acompte) :</td>
-                            <td style="padding: 5px 0; text-align: right; color: #f87171;">- {fmt(tax_paid)}</td>
-                        </tr>
-                        <tr style="border-top: 1px solid #374151;">
-                            <td style="padding: 8px 0; font-weight: bold;">Intérêts Brut de Taxe :</td>
-                            <td style="padding: 8px 0; text-align: right; font-weight: bold; color: #10b981;">{fmt(gross_int)}</td>
-                        </tr>
-                    </table>
-                    <p style="font-size: 11px; color: #9ca3af; margin-top: 15px;">
-                        <i>Le prélèvement à la source effectué par Trade Republic fait office d'acompte (flat-tax acomptes). La case 2CK génère un crédit d'impôt équivalent pour éviter la double imposition.</i>
-                    </p>
-                </div>
-                """, unsafe_allow_html=True)
+                with st.container(border=True):
+                    st.subheader("Synthèse des Gains Rémunérés")
+                    st.markdown("Récapitulatif de vos gains pour l'année :")
+                    st.markdown("---")
+                    st.metric("Intérêts Nets encaissés", fmt(net_int))
+                    st.metric("Prélèvement à la source (Acompte)", f"- {fmt(tax_paid)}")
+                    st.metric("Intérêts Bruts de Taxe", fmt(gross_int))
+                    st.markdown("---")
+                    st.info("Le prélèvement à la source effectué par Trade Republic fait office d'acompte. La case 2CK génère un crédit d'impôt équivalent pour éviter la double imposition.")
                 
     st.markdown("---")
     st.markdown("### Formulaire 3916 — Déclaration de Compte à l'Étranger")
