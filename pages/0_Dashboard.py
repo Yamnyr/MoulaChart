@@ -6,10 +6,6 @@ import plotly.graph_objects as go
 import requests
 from io import StringIO
 
-# --- Configuration de la page ---
-st.set_page_config(page_title="📈 MoulaChart", page_icon="📊", layout="wide")
-
-
 # --- Charger la liste des tickers dynamiquement ---
 @st.cache_data
 def get_tickers(source="S&P 500"):

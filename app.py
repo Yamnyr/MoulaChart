@@ -1,10 +1,5 @@
 import streamlit as st
 
-with st.sidebar:
-
-    st.title("")
-
-
 st.set_page_config(page_title="📈 MoulaChart", page_icon="📊", layout="wide")
 
 # --- Navigation principale sans sous-menus ---

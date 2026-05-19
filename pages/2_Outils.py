@@ -3,8 +3,6 @@ import pandas as pd
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
-st.set_page_config(page_title="Calculatrice d'intérêts composés", page_icon="💰", layout="wide")
-
 st.title("Calculatrice d'intérêts composés avancée")
 st.markdown("Simulez la croissance de votre patrimoine avec des scénarios réalistes")
 st.markdown("---")
