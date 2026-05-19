@@ -1,1 +1,5 @@
 .streamlit/secrets.toml
+
+# Exports financiers sensibles
+*.csv
+Exportation de transactions.csv
