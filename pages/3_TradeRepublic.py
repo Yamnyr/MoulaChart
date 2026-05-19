@@ -285,7 +285,14 @@ border-left:4px solid #10b981;padding-left:12px;}
 """, unsafe_allow_html=True)
 
 st.markdown("# Analyse Trade Republic")
-st.markdown(f"*{len(df)} transactions · {df['date'].min().strftime('%d/%m/%Y')} → {df['date'].max().strftime('%d/%m/%Y')}*")
+# Date string extraction robust to NaT/empty df
+if not df.empty and pd.notna(df['date'].min()) and pd.notna(df['date'].max()):
+    min_d = df['date'].min().strftime('%d/%m/%Y')
+    max_d = df['date'].max().strftime('%d/%m/%Y')
+    date_range_str = f" · {min_d} → {max_d}"
+else:
+    date_range_str = ""
+st.markdown(f"*{len(df)} transactions{date_range_str}*")
 st.markdown("---")
 
 # ════════════════════════════════════════════════════════════════
@@ -436,7 +443,7 @@ with main_tab1:
                         yaxis=dict(showgrid=True, gridcolor="rgba(102,126,234,0.1)", title="Euro (EUR)", showticklabels=not hide_amounts),
                         margin=dict(l=0, r=0, t=50, b=0)
                     )
-                    st.plotly_chart(fig_pat, use_container_width=True)
+                    st.plotly_chart(fig_pat, width="stretch")
 
         elif "Capital cumulé par ETF" in evol_mode:
             col_l, col_r = st.columns([2, 1])
@@ -470,7 +477,7 @@ with main_tab1:
                         yaxis=dict(showgrid=True, gridcolor="rgba(102,126,234,0.1)", title="€ investi", showticklabels=not hide_amounts),
                         margin=dict(l=0, r=0, t=50, b=0)
                     )
-                    st.plotly_chart(fig, use_container_width=True)
+                    st.plotly_chart(fig, width="stretch")
 
             with col_r:
                 monthly_buys = buys.groupby("month")["amount"].apply(lambda x: x.abs().sum()).reset_index()
@@ -488,7 +495,7 @@ with main_tab1:
                     yaxis=dict(showgrid=True, gridcolor="rgba(102,126,234,0.1)", title="€", showticklabels=not hide_amounts),
                     margin=dict(l=0, r=0, t=50, b=60)
                 )
-                st.plotly_chart(fig2, use_container_width=True)
+                st.plotly_chart(fig2, width="stretch")
 
         else:
             monthly_buys = buys.groupby("month")["amount"].apply(lambda x: x.abs().sum()).reset_index()
@@ -506,7 +513,7 @@ with main_tab1:
                 yaxis=dict(showgrid=True, gridcolor="rgba(102,126,234,0.1)", title="€", showticklabels=not hide_amounts),
                 margin=dict(l=0, r=0, t=50, b=60)
             )
-            st.plotly_chart(fig2, use_container_width=True)
+            st.plotly_chart(fig2, width="stretch")
 
     with tab_inv2:
         col_a, col_b = st.columns(2)
@@ -530,7 +537,7 @@ with main_tab1:
                     annotations=[dict(text=fmt(total_current_value, decimals=0), x=0.5, y=0.5,
                                       font=dict(size=18, color="white"), showarrow=False)]
                 )
-                st.plotly_chart(fig_pie, use_container_width=True)
+                st.plotly_chart(fig_pie, width="stretch")
 
         with col_b:
             if not df_positions.empty:
@@ -554,7 +561,7 @@ with main_tab1:
                     yaxis=dict(showgrid=True, gridcolor="rgba(102,126,234,0.1)", title="€ actuel", showticklabels=not hide_amounts),
                     margin=dict(l=0, r=0, t=60, b=0)
                 )
-                st.plotly_chart(fig_cto_pea, use_container_width=True)
+                st.plotly_chart(fig_cto_pea, width="stretch")
 
     with tab_inv3:
         # Totals CTO vs PEA Val Actuelle & Plus-values
@@ -595,13 +602,16 @@ with main_tab1:
                     display_etf[col] = "••••"
                 st.dataframe(display_etf, width="stretch", hide_index=True)
             else:
+                val_max = display_etf["Plus-value (%)"].abs().max()
+                if pd.isna(val_max) or val_max == 0:
+                    val_max = 1.0
                 st.dataframe(
                     display_etf.style.format({
                         "Investi (€)": "{:,.2f}", "Parts": "{:.4f}",
                         "PRU (€)": "{:.2f}", "Cours (€)": "{:.2f}",
                         "Valeur Actuelle (€)": "{:,.2f}",
                         "Plus-value (€)": "{:+.2f}", "Plus-value (%)": "{:+.2f}%"
-                    }).background_gradient(subset=["Plus-value (%)"], cmap="RdYlGn", align=0),
+                    }).background_gradient(subset=["Plus-value (%)"], cmap="RdYlGn", vmin=-val_max, vmax=val_max),
                     width="stretch", hide_index=True
                 )
         else:
@@ -619,7 +629,7 @@ with main_tab1:
                 plot_bgcolor="rgba(15,23,42,0.5)", paper_bgcolor="rgba(0,0,0,0)",
                 font=dict(color="#e2e8f0"), height=280,
                 xaxis=dict(tickangle=45), yaxis=dict(showticklabels=not hide_amounts), margin=dict(l=0,r=0,t=40,b=60))
-            st.plotly_chart(fig_sav, use_container_width=True)
+            st.plotly_chart(fig_sav, width="stretch")
         with c2:
             int_monthly = interests.groupby("month")["amount"].sum().reset_index()
             fig_int = go.Figure(go.Bar(x=int_monthly["month"], y=int_monthly["amount"],
@@ -629,7 +639,7 @@ with main_tab1:
                 plot_bgcolor="rgba(15,23,42,0.5)", paper_bgcolor="rgba(0,0,0,0)",
                 font=dict(color="#e2e8f0"), height=280,
                 xaxis=dict(tickangle=45), yaxis=dict(showticklabels=not hide_amounts), margin=dict(l=0,r=0,t=40,b=60))
-            st.plotly_chart(fig_int, use_container_width=True)
+            st.plotly_chart(fig_int, width="stretch")
 
 # ════════════════════════════════════════════════════════════════
 # TAB 2 — DÉPENSES
@@ -719,7 +729,7 @@ with main_tab2:
             font=dict(color="#e2e8f0", size=13), height=600,
             margin=dict(l=10, r=10, t=20, b=10)
         )
-        st.plotly_chart(fig_sankey, use_container_width=True)
+        st.plotly_chart(fig_sankey, width="stretch")
 
     with tab_dep2:
         monthly_cats = (cards.groupby(["month", "category_label"])["amount"]
@@ -738,7 +748,7 @@ with main_tab2:
             legend=dict(orientation="h", y=-0.3),
             margin=dict(l=0, r=0, t=50, b=100)
         )
-        st.plotly_chart(fig_stack, use_container_width=True)
+        st.plotly_chart(fig_stack, width="stretch")
 
         # Evolution dépenses totales mensuelles
         monthly_total = cards.groupby("month")["amount"].apply(lambda x: x.abs().sum()).reset_index()
@@ -757,7 +767,7 @@ with main_tab2:
             yaxis=dict(showticklabels=not hide_amounts),
             margin=dict(l=0, r=0, t=50, b=60)
         )
-        st.plotly_chart(fig_line, use_container_width=True)
+        st.plotly_chart(fig_line, width="stretch")
 
     with tab_dep3:
         cards_clean = cards.copy()
@@ -782,7 +792,7 @@ with main_tab2:
             height=580, xaxis=dict(title="€ total", showgrid=True, gridcolor="rgba(102,126,234,0.1)", showticklabels=not hide_amounts),
             yaxis=dict(showgrid=False), margin=dict(l=10, r=10, t=50, b=0)
         )
-        st.plotly_chart(fig_top, use_container_width=True)
+        st.plotly_chart(fig_top, width="stretch")
 
         st.markdown("---")
         st.subheader("Toutes les dépenses")
