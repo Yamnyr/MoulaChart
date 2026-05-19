@@ -4,6 +4,8 @@ import plotly.graph_objects as go
 import plotly.express as px
 from datetime import datetime
 import os
+import yfinance as yf
+from yahooquery import search as yq_search
 
 # ── MCC categories (Clean plain text) ───────────────────────────
 MCC_CATEGORIES = {
@@ -15,6 +17,14 @@ MCC_CATEGORIES = {
     "5941": "Sport", "5734": "Loisirs", "7996": "Loisirs",
     "5999": "Divers", "5965": "E-commerce",
     "7399": "Services", "9405": "Impots/Admin", "5462": "Boulangerie",
+}
+
+# ── ISIN-to-Ticker Map (Yahoo Finance EUR-denominated tickers) ─
+ISIN_TICKERS = {
+    "IE00B5BMR087": "SXR8.DE",    # S&P 500 Acc
+    "IE0002XZSHO1": "WPEA.PA",    # MSCI World Swap PEA Acc
+    "FR0011871110": "PANX.PA",    # PEA Nasdaq 100 Acc
+    "FR0010342592": "LQQ.PA",     # PEA Nasdaq 100 2x Lev Acc
 }
 
 # ── Load data ────────────────────────────────────────────────────
@@ -50,9 +60,35 @@ def load_csv(file) -> pd.DataFrame:
     df["month"] = df["date"].dt.to_period("M").astype(str)
     return df
 
+# ── Fetch live Yahoo prices ──────────────────────────────────────
+@st.cache_data(ttl=1800)
+def fetch_current_prices(isin_list):
+    prices = {}
+    for isin in isin_list:
+        ticker = ISIN_TICKERS.get(isin)
+        if not ticker:
+            try:
+                res = yq_search(isin)
+                if res and 'quotes' in res and len(res['quotes']) > 0:
+                    ticker = res['quotes'][0]['symbol']
+            except:
+                pass
+        if not ticker:
+            ticker = isin
+        
+        try:
+            df_hist = yf.download(ticker, period="5d", interval="1d", auto_adjust=True, progress=False)
+            if not df_hist.empty:
+                if isinstance(df_hist.columns, pd.MultiIndex):
+                    df_hist.columns = df_hist.columns.get_level_values(0)
+                prices[isin] = float(df_hist["Close"].dropna().iloc[-1])
+        except:
+            pass
+    return prices
+
 # ── Sidebar ──────────────────────────────────────────────────────
 with st.sidebar:
-    st.title("Trade Republic")
+    st.title("🏦 Trade Republic")
     st.markdown("---")
     
     # Toggle to hide amounts
@@ -75,15 +111,6 @@ def fmt(val, is_curr=True, decimals=2):
     if is_curr:
         return f"{val:,.{decimals}f} €"
     return f"{val:,.{decimals}f}"
-
-def mask_df(df_to_mask, columns_to_mask, is_curr=True):
-    if hide_amounts:
-        copy_df = df_to_mask.copy()
-        for col in columns_to_mask:
-            if col in copy_df.columns:
-                copy_df[col] = "•••• €" if is_curr else "••••"
-        return copy_df
-    return df_to_mask
 
 # ── Load ─────────────────────────────────────────────────────────
 try:
@@ -115,6 +142,38 @@ inflows = df[df["type"].isin(["CUSTOMER_INBOUND", "TRANSFER_INSTANT_INBOUND"])]
 savings = df[df["type"] == "BENEFITS_SAVEBACK"]
 interests = df[df["type"] == "INTEREST_PAYMENT"]
 
+# ── Plus-Values calculations using yfinance ──────────────────────
+unique_isins = buys["symbol"].dropna().unique().tolist()
+live_prices = fetch_current_prices(unique_isins)
+
+# Aggregation by ISIN and ETF Name
+etf_detail = buys.groupby(["symbol", "etf_name", "account_type"]).agg(
+    Achats=("amount", "count"),
+    Investi=("amount", lambda x: x.abs().sum()),
+    Parts=("shares", "sum")
+).reset_index()
+
+# Map live prices
+etf_detail["Cours actuel (€)"] = etf_detail["symbol"].map(live_prices)
+# Fallback if Yahoo Finance fails
+etf_detail["Cours actuel (€)"] = etf_detail["Cours actuel (€)"].fillna(etf_detail["Investi"] / etf_detail["Parts"])
+
+# Math calculations
+etf_detail["Prix moy./part (€)"] = etf_detail["Investi"] / etf_detail["Parts"].replace(0, float("nan"))
+etf_detail["Valeur actuelle (€)"] = etf_detail["Parts"] * etf_detail["Cours actuel (€)"]
+etf_detail["Plus-value (€)"] = etf_detail["Valeur actuelle (€)"] - etf_detail["Investi"]
+etf_detail["Plus-value (%)"] = (etf_detail["Plus-value (€)"] / etf_detail["Investi"] * 100).fillna(0.0)
+
+# Total calculations
+total_invested = etf_detail["Investi"].sum()
+total_current_value = etf_detail["Valeur actuelle (€)"].sum()
+total_plus_value = total_current_value - total_invested
+plus_value_percent = (total_plus_value / total_invested * 100) if total_invested > 0 else 0.0
+
+total_saveback = savings["amount"].sum()
+total_interest = interests["amount"].sum()
+total_spent = cards["amount"].abs().sum()
+
 # ════════════════════════════════════════════════════════════════
 # HEADER
 # ════════════════════════════════════════════════════════════════
@@ -140,14 +199,8 @@ st.markdown(f"*{len(df)} transactions · {df['date'].min().strftime('%d/%m/%Y')}
 st.markdown("---")
 
 # ════════════════════════════════════════════════════════════════
-# KPIs
+# KPIs (with Plus-Values!)
 # ════════════════════════════════════════════════════════════════
-total_invested = buys["amount"].abs().sum()
-total_deposited = inflows["amount"].sum()
-total_saveback = savings["amount"].sum()
-total_interest = interests["amount"].sum()
-total_spent = cards["amount"].abs().sum()
-
 c1, c2, c3, c4, c5 = st.columns(5)
 def kpi(col, label, value, delta=None, pos=True):
     dclass = "metric-delta-pos" if pos else "metric-delta-neg"
@@ -157,9 +210,14 @@ def kpi(col, label, value, delta=None, pos=True):
     <div class="metric-value">{value}</div>{delta_html}</div>""", unsafe_allow_html=True)
 
 kpi(c1, "Total investi", fmt(total_invested, decimals=0))
-kpi(c2, "Depots totaux", fmt(total_deposited, decimals=0))
-kpi(c3, "Saveback recu", fmt(total_saveback), "Cashback 1%")
-kpi(c4, "Interets recus", fmt(total_interest))
+kpi(c2, "Valeur actuelle", fmt(total_current_value, decimals=0))
+
+# Plus-value globale Delta
+pv_label = fmt(total_plus_value)
+pv_pct_label = f"{plus_value_percent:+.2f}%" if not hide_amounts else ""
+kpi(c3, "Plus-value globale", pv_label, f"{pv_pct_label}" if not hide_amounts else "", pos=(total_plus_value >= 0))
+
+kpi(c4, "Gains (Int. & Sav.)", fmt(total_interest + total_saveback), f"Interets: {fmt(total_interest)}")
 kpi(c5, "Depenses carte", fmt(total_spent, decimals=0), f"{len(cards)} transactions", False)
 
 # Main Navigation Tabs
@@ -274,40 +332,58 @@ with main_tab1:
 
     with tab_inv3:
         # Totaux CTO vs PEA
-        cto_total = buys[buys["account_type"] == "CTO"]["amount"].abs().sum()
-        pea_total = buys[buys["account_type"] == "PEA"]["amount"].abs().sum()
+        cto_total = etf_detail[etf_detail["account_type"] == "CTO"]["Investi"].sum()
+        cto_current = etf_detail[etf_detail["account_type"] == "CTO"]["Valeur actuelle (€)"].sum()
+        cto_pv = cto_current - cto_total
+        cto_pv_pct = (cto_pv / cto_total * 100) if cto_total > 0 else 0.0
+
+        pea_total = etf_detail[etf_detail["account_type"] == "PEA"]["Investi"].sum()
+        pea_current = etf_detail[etf_detail["account_type"] == "PEA"]["Valeur actuelle (€)"].sum()
+        pea_pv = pea_current - pea_total
+        pea_pv_pct = (pea_pv / pea_total * 100) if pea_total > 0 else 0.0
+
         grand_total = cto_total + pea_total
+        grand_current = cto_current + pea_current
+        
         mc1, mc2, mc3 = st.columns(3)
-        mc1.metric("CTO — Total investi", fmt(cto_total, decimals=0),
-                   f"{cto_total/grand_total*100:.1f}%" if grand_total and not hide_amounts else "")
-        mc2.metric("PEA — Total investi", fmt(pea_total, decimals=0),
-                   f"{pea_total/grand_total*100:.1f}%" if grand_total and not hide_amounts else "")
-        mc3.metric("Total tous comptes", fmt(grand_total, decimals=0))
+        
+        # Display with dynamic PV
+        mc1.metric(
+            "CTO — Valeur Actuelle", 
+            fmt(cto_current, decimals=0),
+            f"Plus-value: {cto_pv:+.2f} € ({cto_pv_pct:+.2f}%)" if not hide_amounts else ""
+        )
+        mc2.metric(
+            "PEA — Valeur Actuelle", 
+            fmt(pea_current, decimals=0),
+            f"Plus-value: {pea_pv:+.2f} € ({pea_pv_pct:+.2f}%)" if not hide_amounts else ""
+        )
+        mc3.metric(
+            "Portefeuille Total", 
+            fmt(grand_current, decimals=0),
+            f"Plus-value: {total_plus_value:+.2f} € ({plus_value_percent:+.2f}%)" if not hide_amounts else ""
+        )
+        
         st.markdown("---")
         
-        etf_detail = buys.groupby(["etf_name", "account_type"]).agg(
-            Achats=("amount", "count"),
-            Investi=("amount", lambda x: x.abs().sum()),
-            Parts=("shares", "sum"),
-            Prix_moyen=("price", "mean")
-        ).reset_index()
-        etf_detail.columns = ["ETF", "Compte", "Nb achats", "Investi (€)", "Parts totales", "Prix moy./part (€)"]
-        etf_detail["Valeur/part actuelle (€)"] = etf_detail["Investi (€)"] / etf_detail["Parts totales"].replace(0, float("nan"))
+        # Detail dataframe with live prices & plus-values
+        display_cols = ["etf_name", "account_type", "Achats", "Investi", "Parts", "Prix moy./part (€)", "Cours actuel (€)", "Valeur actuelle (€)", "Plus-value (€)", "Plus-value (%)"]
+        display_etf = etf_detail[display_cols].copy()
+        display_etf.columns = ["ETF", "Compte", "Achats", "Investi (€)", "Parts", "PRU (€)", "Cours actuel (€)", "Valeur actuelle (€)", "Plus-value (€)", "Plus-value (%)"]
         
         # Mask if requested
-        display_etf = etf_detail.copy()
         if hide_amounts:
-            display_etf["Investi (€)"] = "••••"
-            display_etf["Parts totales"] = "••••"
-            display_etf["Prix moy./part (€)"] = "••••"
-            display_etf["Valeur/part actuelle (€)"] = "••••"
+            for col in ["Investi (€)", "Parts", "PRU (€)", "Cours actuel (€)", "Valeur actuelle (€)", "Plus-value (€)", "Plus-value (%)"]:
+                display_etf[col] = "••••"
             st.dataframe(display_etf, use_container_width=True, hide_index=True)
         else:
             st.dataframe(
                 display_etf.style.format({
-                    "Investi (€)": "{:,.2f}", "Parts totales": "{:.4f}",
-                    "Prix moy./part (€)": "{:.2f}", "Valeur/part actuelle (€)": "{:.2f}"
-                }).background_gradient(subset=["Investi (€)"], cmap="Greens"),
+                    "Investi (€)": "{:,.2f}", "Parts": "{:.4f}",
+                    "PRU (€)": "{:.2f}", "Cours actuel (€)": "{:.2f}",
+                    "Valeur actuelle (€)": "{:,.2f}",
+                    "Plus-value (€)": "{:+.2f}", "Plus-value (%)": "{:+.2f}%"
+                }).background_gradient(subset=["Plus-value (%)"], cmap="RdYlGn", align=0),
                 use_container_width=True, hide_index=True
             )
             
